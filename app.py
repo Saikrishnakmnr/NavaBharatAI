@@ -1201,7 +1201,10 @@ def social_links(
 
 def go(page_name):
 
+    # Keep the sidebar radio widget synchronized with
+    # programmatic navigation from Home/cards/buttons.
     st.session_state.nav_page = page_name
+    st.session_state.main_navigation = page_name
 
     st.rerun()
 
@@ -2549,6 +2552,7 @@ POWERED BY RACHARLGPT
     ):
 
         st.session_state.nav_page = selected
+        st.session_state.main_navigation = selected
 
         st.rerun()
 
