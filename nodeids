@@ -1,0 +1,6 @@
+[
+  "tests/test_app.py::test_bundled_ffmpeg_can_render_media",
+  "tests/test_app.py::test_no_system_ffmpeg_call",
+  "tests/test_app.py::test_python_syntax",
+  "tests/test_app.py::test_required_pages_and_features"
+]
