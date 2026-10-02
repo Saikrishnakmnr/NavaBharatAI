@@ -1201,11 +1201,14 @@ def social_links(
 
 def go(page_name):
 
-    # Keep the sidebar radio widget synchronized with
-    # programmatic navigation from Home/cards/buttons.
+    # Do not write to main_navigation here: that key belongs to
+    # the st.radio widget and Streamlit forbids changing it after
+    # the widget has already been instantiated in the current run.
+    #
+    # pending_nav is a separate state value. On the next rerun it
+    # is copied into the radio state BEFORE the widget is created.
+    st.session_state.pending_nav = page_name
     st.session_state.nav_page = page_name
-    st.session_state.main_navigation = page_name
-
     st.rerun()
 
 
@@ -2498,8 +2501,16 @@ NAVIGATION = {
 
 
 if "nav_page" not in st.session_state:
-
     st.session_state.nav_page = "🏠 Home"
+
+if "pending_nav" not in st.session_state:
+    st.session_state.pending_nav = None
+
+# Apply programmatic navigation BEFORE the radio widget is created.
+if st.session_state.pending_nav in NAVIGATION:
+    st.session_state.nav_page = st.session_state.pending_nav
+    st.session_state.main_navigation = st.session_state.pending_nav
+    st.session_state.pending_nav = None
 
 
 with st.sidebar:
@@ -2546,14 +2557,9 @@ POWERED BY RACHARLGPT
         key="main_navigation",
     )
 
-    if (
-        selected
-        != st.session_state.nav_page
-    ):
+    if selected != st.session_state.nav_page:
 
         st.session_state.nav_page = selected
-        st.session_state.main_navigation = selected
-
         st.rerun()
 
     st.divider()
