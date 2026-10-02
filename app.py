@@ -11,6 +11,48 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
+
+
+# ============================================================
+# AUTOMATIC HTML HEAD INJECTION (FOR GA & MONETAG VERIFICATION)
+# ============================================================
+
+def inject_tracking_scripts():
+    """
+    Patches Streamlit's underlying static index.html file dynamically at startup.
+    This injects the Google Analytics and Monetag script tags into the real <head>
+    element so that Google Tag verification and crawlers detect G-39MNX1V7XK.
+    """
+    try:
+        streamlit_path = Path(st.__path__[0])
+        index_path = streamlit_path / "static" / "index.html"
+        
+        if index_path.exists():
+            html_text = index_path.read_text(encoding="utf-8")
+            
+            if "G-39MNX1V7XK" not in html_text:
+                head_injection = """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-39MNX1V7XK"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-39MNX1V7XK');
+    </script>
+
+    <!-- Monetag Script (Zone ID: 11941649) -->
+    <script src="https://3nbf4.com/act/files/tag.min.js?z=11941649" data-cfasync="false" async></script>
+    """
+                updated_html = html_text.replace("<head>", f"<head>\n{head_injection}")
+                index_path.write_text(updated_html, encoding="utf-8")
+    except Exception:
+        # Fallback if filesystem is read-only
+        pass
+
+inject_tracking_scripts()
 
 
 # ============================================================
@@ -44,30 +86,7 @@ st.set_page_config(
 
 
 # ============================================================
-# GOOGLE ANALYTICS & MONETAG AD INJECTION
-# ============================================================
-
-st.markdown(
-    """
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-39MNX1V7XK"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-
-      gtag('config', 'G-39MNX1V7XK');
-    </script>
-
-    <!-- Monetag Script (Zone ID: 11941649) -->
-    <script src="https://3nbf4.com/act/files/tag.min.js?z=11941649" data-cfasync="false" async></script>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# PREMIUM UI
+# PREMIUM UI STYLES
 # ============================================================
 
 st.markdown(
@@ -779,29 +798,12 @@ def gemini_generate(
 
 
 # ============================================================
-# IMPORTANT STREAMLIT OUTPUT FIX
+# STREAMLIT OUTPUT FIX
 # ============================================================
 
 def render_answer(answer):
-
-    """
-    IMPORTANT:
-
-    Do NOT do:
-
-        st.write(st.markdown(answer))
-        st.write(st.success(answer))
-        st.write(st.error(answer))
-
-    Streamlit returns a DeltaGenerator from those functions.
-    st.write() then displays its internal help object.
-
-    This helper renders the result exactly once.
-    """
-
     if answer is None:
         return
-
     st.markdown(answer)
 
 
@@ -1161,7 +1163,6 @@ def social_links(
     text,
     url=CHANNEL_URL
 ):
-    """Open platform share dialogs. The app does not store the share text."""
     encoded_text = urllib.parse.quote_plus(str(text))
     encoded_url = urllib.parse.quote_plus(str(url))
 
@@ -1223,13 +1224,6 @@ def social_links(
 # ============================================================
 
 def go(page_name):
-
-    # Do not write to main_navigation here: that key belongs to
-    # the st.radio widget and Streamlit forbids changing it after
-    # the widget has already been instantiated in the current run.
-    #
-    # pending_nav is a separate state value. On the next rerun it
-    # is copied into the radio state BEFORE the widget is created.
     st.session_state.pending_nav = page_name
     st.session_state.nav_page = page_name
     st.rerun()
@@ -2134,7 +2128,6 @@ Visitors can listen only. The admin can publish or delete songs.
                 key=f"delete_song_{index}_{song.name}",
                 help=f"Delete {song.name} from the public library",
             ):
-                # Restrict deletion to files directly inside MUSIC_DIR.
                 try:
                     resolved_music = MUSIC_DIR.resolve()
                     resolved_song = song.resolve()
@@ -2529,7 +2522,6 @@ if "nav_page" not in st.session_state:
 if "pending_nav" not in st.session_state:
     st.session_state.pending_nav = None
 
-# Apply programmatic navigation BEFORE the radio widget is created.
 if st.session_state.pending_nav in NAVIGATION:
     st.session_state.nav_page = st.session_state.pending_nav
     st.session_state.main_navigation = st.session_state.pending_nav
@@ -2551,7 +2543,7 @@ NavaBharat AI
 </div>
 
 <div class="tag">
-POWERED BY RACHARLGPT
+POWERED BY RACHARLAGPT
 </div>
 
 </div>
@@ -2602,8 +2594,6 @@ POWERED BY RACHARLGPT
 # RUN CURRENT PAGE
 # ============================================================
 
-# Safety fallback: prevents a stale/invalid session-state value
-# from causing a KeyError when the app is updated.
 if st.session_state.nav_page not in NAVIGATION:
     st.session_state.nav_page = "🏠 Home"
 
