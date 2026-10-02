@@ -21,6 +21,9 @@ import streamlit as st
 
 APP_NAME = "NavaBharat AI"
 APP_VERSION = "6.0.0"
+CREATOR = "Racharla Saikrishna"
+BRAND = "RacharlaGPT"
+TAGLINE = "POWERED BY RACHARLAGPT"
 CHANNEL_URL = "https://www.youtube.com/@racharlagpt"
 
 MAX_UPLOAD_MB = 250
@@ -320,53 +323,103 @@ html, body, [class*="css"] {
 }
 
 
-/* BUTTONS */
+/* BUTTONS — mixed radiant colors, strong contrast, visible text */
 
 .stButton > button,
 .stDownloadButton > button,
 .stLinkButton > a,
 .stFormSubmitButton > button {
-
     border: 0 !important;
-
     border-radius: 16px !important;
-
     min-height: 46px !important;
-
-    font-weight: 850 !important;
-
+    padding: 9px 16px !important;
+    font-weight: 900 !important;
     color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.25) !important;
+    background: linear-gradient(120deg,#7c3aed,#2563eb,#0891b2,#db2777) !important;
+    background-size: 260% 260% !important;
+    box-shadow: 0 9px 27px rgba(37,99,235,.22) !important;
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease !important;
+}
 
-    background:
-        linear-gradient(
-            110deg,
-            #7c3aed,
-            #2563eb,
-            #0891b2,
-            #db2777
-        ) !important;
+/* Different radiant colors for different buttons/tabs */
+.stButton:nth-of-type(6n+1) > button,
+.stFormSubmitButton:nth-of-type(6n+1) > button {
+    background: linear-gradient(120deg,#7c3aed,#db2777,#f43f5e) !important;
+}
+.stButton:nth-of-type(6n+2) > button,
+.stFormSubmitButton:nth-of-type(6n+2) > button {
+    background: linear-gradient(120deg,#2563eb,#0891b2,#06b6d4) !important;
+}
+.stButton:nth-of-type(6n+3) > button,
+.stFormSubmitButton:nth-of-type(6n+3) > button {
+    background: linear-gradient(120deg,#059669,#10b981,#84cc16) !important;
+}
+.stButton:nth-of-type(6n+4) > button,
+.stFormSubmitButton:nth-of-type(6n+4) > button {
+    background: linear-gradient(120deg,#ea580c,#f59e0b,#f97316) !important;
+}
+.stButton:nth-of-type(6n+5) > button,
+.stFormSubmitButton:nth-of-type(6n+5) > button {
+    background: linear-gradient(120deg,#be123c,#e11d48,#9333ea) !important;
+}
+.stButton:nth-of-type(6n) > button,
+.stFormSubmitButton:nth-of-type(6n) > button {
+    background: linear-gradient(120deg,#0f766e,#14b8a6,#2563eb) !important;
+}
 
-    background-size:
-        260% 260% !important;
-
-    box-shadow:
-        0 9px 27px rgba(37,99,235,.20) !important;
-
-    transition:
-        transform .18s ease,
-        box-shadow .18s ease !important;
+.stDownloadButton > button {
+    background: linear-gradient(120deg,#334155,#475569,#0f172a) !important;
+}
+.stLinkButton > a {
+    background: linear-gradient(120deg,#4f46e5,#7c3aed,#ec4899) !important;
 }
 
 .stButton > button:hover,
 .stDownloadButton > button:hover,
-.stLinkButton > a:hover {
-    transform:
-        translateY(-2px);
-
-    box-shadow:
-        0 14px 32px rgba(37,99,235,.30) !important;
+.stLinkButton > a:hover,
+.stFormSubmitButton > button:hover {
+    transform: translateY(-3px) scale(1.01);
+    filter: brightness(1.08) saturate(1.15);
+    box-shadow: 0 16px 34px rgba(37,99,235,.34) !important;
 }
 
+/* Make button labels visible on every theme */
+.stButton > button p,
+.stDownloadButton > button p,
+.stLinkButton > a p,
+.stFormSubmitButton > button p,
+.stLinkButton > a div {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-weight: 900 !important;
+}
+
+/* Home cards — different radiant backgrounds */
+.home-card-1 { background: linear-gradient(135deg,rgba(239,246,255,.98),rgba(219,234,254,.94),rgba(224,231,255,.92)) !important; }
+.home-card-2 { background: linear-gradient(135deg,rgba(250,245,255,.98),rgba(243,232,255,.94),rgba(252,231,243,.92)) !important; }
+.home-card-3 { background: linear-gradient(135deg,rgba(236,253,245,.98),rgba(209,250,229,.94),rgba(207,250,254,.92)) !important; }
+.home-card-4 { background: linear-gradient(135deg,rgba(255,247,237,.98),rgba(254,215,170,.90),rgba(254,240,138,.84)) !important; }
+.home-card-5 { background: linear-gradient(135deg,rgba(239,246,255,.98),rgba(224,242,254,.94),rgba(233,213,255,.92)) !important; }
+
+.home-card-1, .home-card-2, .home-card-3, .home-card-4, .home-card-5 {
+    transition: transform .20s ease, box-shadow .20s ease, border-color .20s ease;
+}
+.home-card-1:hover, .home-card-2:hover, .home-card-3:hover,
+.home-card-4:hover, .home-card-5:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 20px 50px rgba(30,41,59,.16);
+    border-color: rgba(99,102,241,.35);
+}
+
+
+/* SOCIAL SHARE BUTTON COLORS */
+.share-whatsapp a { background: linear-gradient(120deg,#16a34a,#22c55e,#84cc16) !important; }
+.share-facebook a { background: linear-gradient(120deg,#1877f2,#2563eb,#60a5fa) !important; }
+.share-x a { background: linear-gradient(120deg,#111827,#334155,#000000) !important; }
+.share-linkedin a { background: linear-gradient(120deg,#0a66c2,#0284c7,#06b6d4) !important; }
+.share-instagram a { background: linear-gradient(120deg,#7c3aed,#db2777,#f97316) !important; }
 
 /* INPUTS */
 
@@ -1085,70 +1138,61 @@ def social_links(
     text,
     url=CHANNEL_URL
 ):
-
-    encoded_text = urllib.parse.quote_plus(
-        text
-    )
-
-    encoded_url = urllib.parse.quote_plus(
-        url
-    )
+    """Open platform share dialogs. The app does not store the share text."""
+    encoded_text = urllib.parse.quote_plus(str(text))
+    encoded_url = urllib.parse.quote_plus(str(url))
 
     columns = st.columns(5)
 
-    with columns[0]:
-
-        st.link_button(
+    share_items = [
+        (
             "🟢 WhatsApp",
-            (
-                "https://wa.me/?text="
-                + encoded_text
-                + "%20"
-                + encoded_url
-            ),
-        )
-
-    with columns[1]:
-
-        st.link_button(
-            "📘 Facebook",
-            (
-                "https://www.facebook.com/"
-                "sharer/sharer.php?u="
-                + encoded_url
-            ),
-        )
-
-    with columns[2]:
-
-        st.link_button(
-            "𝕏 X",
-            (
-                "https://twitter.com/intent/tweet?"
-                "text="
-                + encoded_text
-                + "&url="
-                + encoded_url
-            ),
-        )
-
-    with columns[3]:
-
-        st.link_button(
-            "💼 LinkedIn",
-            (
-                "https://www.linkedin.com/"
-                "sharing/share-offsite/?url="
-                + encoded_url
-            ),
-        )
-
-    with columns[4]:
-
-        st.link_button(
+            "https://wa.me/?text="
+            + encoded_text
+            + "%20"
+            + encoded_url,
+            "share-whatsapp",
+        ),
+        (
+            "🔵 Facebook",
+            "https://www.facebook.com/sharer/sharer.php?u="
+            + encoded_url,
+            "share-facebook",
+        ),
+        (
+            "⚫ X",
+            "https://twitter.com/intent/tweet?text="
+            + encoded_text
+            + "&url="
+            + encoded_url,
+            "share-x",
+        ),
+        (
+            "🔷 LinkedIn",
+            "https://www.linkedin.com/sharing/share-offsite/?url="
+            + encoded_url,
+            "share-linkedin",
+        ),
+        (
             "📸 Instagram",
             "https://www.instagram.com/",
-        )
+            "share-instagram",
+        ),
+    ]
+
+    for column, (label, link, css_class) in zip(columns, share_items):
+        with column:
+            st.markdown(
+                f'<div class="share-wrap {css_class}">',
+                unsafe_allow_html=True,
+            )
+            st.link_button(label, link, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption(
+        "Sharing opens the selected platform. NavaBharat AI does not save "
+        "your generated answer in an app database."
+    )
 
 
 # ============================================================
@@ -1194,7 +1238,7 @@ music and live information in one place.
 
         st.markdown(
             """
-<div class="card">
+<div class="card home-card-1">
 
 <h3>🧠 Solve Anything</h3>
 
@@ -1220,7 +1264,7 @@ answers.
 
         st.markdown(
             """
-<div class="card">
+<div class="card home-card-2">
 
 <h3>🎬 RacharlaGPT Video Studio</h3>
 
@@ -1243,7 +1287,7 @@ music. Local rendering requires no AI key.
 
     st.markdown(
         """
-<div class="card">
+<div class="card home-card-3">
 
 <h3>🎵 RacharlaGPT Music</h3>
 
@@ -1266,7 +1310,7 @@ upload songs. The admin publishes songs.
 
     st.markdown(
         """
-<div class="card">
+<div class="card home-card-4">
 
 <h3>🌐 Live Information</h3>
 
@@ -1377,6 +1421,12 @@ Gemini answers when available.
 
                 render_answer(answer)
 
+                st.markdown("### 📤 Share this Answer")
+                social_links(
+                    answer,
+                    CHANNEL_URL,
+                )
+
             else:
 
                 st.error(answer)
@@ -1466,6 +1516,12 @@ Problem:
 
                 render_answer(answer)
 
+                st.markdown("### 📤 Share this Science Answer")
+                social_links(
+                    answer,
+                    CHANNEL_URL,
+                )
+
             else:
 
                 st.error(answer)
@@ -1547,6 +1603,12 @@ TEXT:
             if ok:
 
                 render_answer(answer)
+
+                st.markdown("### 📤 Share this Translation")
+                social_links(
+                    answer,
+                    CHANNEL_URL,
+                )
 
             else:
 
@@ -1938,8 +2000,8 @@ def page_admin_music():
 <h1>🔐 Admin Music Library</h1>
 
 <p>
-Private publishing area.
-Visitors never receive the upload control.
+Private publishing and deletion area.
+Visitors can listen only. The admin can publish or delete songs.
 </p>
 
 </div>
@@ -1950,6 +2012,7 @@ Visitors never receive the upload control.
     password = st.text_input(
         "Admin password",
         type="password",
+        key="music_admin_password",
     )
 
     expected = safe_secret(
@@ -1957,79 +2020,111 @@ Visitors never receive the upload control.
     )
 
     if not expected:
-
         st.warning(
-            "Set MUSIC_ADMIN_PASSWORD "
-            "in Streamlit Secrets first."
+            "Set MUSIC_ADMIN_PASSWORD in Streamlit Secrets first."
         )
-
         return
 
     if password != expected:
-
         st.info(
-            "Enter the admin password "
-            "to manage the public library."
+            "Enter the admin password to manage the public library."
         )
-
         return
+
+    st.success("Admin access verified.")
+
+    # ---------------- PUBLISH ----------------
+    st.markdown("### 📚 Publish a Song")
 
     upload = st.file_uploader(
         "Upload a song",
-        type=[
-            "mp3",
-            "wav",
-            "m4a",
-            "ogg",
-            "aac",
-        ],
+        type=["mp3", "wav", "m4a", "ogg", "aac"],
+        key="admin_music_upload",
     )
 
     title = st.text_input(
         "Song title",
         placeholder="My Song",
+        key="admin_song_title",
     )
 
     if st.button(
         "📚 Publish Song",
         key="publish_song",
     ):
-
         if not upload:
-
-            st.warning(
-                "Choose an audio file."
-            )
-
+            st.warning("Choose an audio file.")
         else:
-
             clean_title = re.sub(
                 r"[^A-Za-z0-9._ -]",
                 "",
-                (
-                    title.strip()
-                    or Path(upload.name).stem
-                ),
+                title.strip() or Path(upload.name).stem,
             ).strip()
 
-            extension = Path(
-                upload.name
-            ).suffix.lower()
+            if not clean_title:
+                clean_title = "Untitled Song"
 
-            destination = (
-                MUSIC_DIR
-                /
-                f"{clean_title}{extension}"
-            )
+            extension = Path(upload.name).suffix.lower()
+            destination = MUSIC_DIR / f"{clean_title}{extension}"
 
-            destination.write_bytes(
-                file_bytes(upload)
-            )
+            data = file_bytes(upload)
+            if data is not None:
+                destination.write_bytes(data)
+                st.success(
+                    f"'{clean_title}' published to RacharlaGPT Music."
+                )
+                st.rerun()
 
-            st.success(
-                "Song published to "
-                "RacharlaGPT Music."
-            )
+    # ---------------- DELETE ----------------
+    st.markdown("### 🗑️ Delete Published Songs")
+    st.caption(
+        "Deletion is restricted to the authenticated admin. "
+        "Visitors never see these controls."
+    )
+
+    songs = music_files()
+
+    if not songs:
+        st.info("The public music library is currently empty.")
+        return
+
+    for index, song in enumerate(songs):
+        col1, col2 = st.columns([4, 1])
+
+        with col1:
+            st.markdown(f"**🎧 {html.escape(song.stem)}**")
+            try:
+                st.audio(song.read_bytes())
+            except Exception:
+                st.warning("Unable to preview this file.")
+
+        with col2:
+            st.write("")
+            if st.button(
+                "🗑️ Delete",
+                key=f"delete_song_{index}_{song.name}",
+                help=f"Delete {song.name} from the public library",
+            ):
+                # Restrict deletion to files directly inside MUSIC_DIR.
+                try:
+                    resolved_music = MUSIC_DIR.resolve()
+                    resolved_song = song.resolve()
+
+                    if resolved_song.parent != resolved_music:
+                        st.error("Invalid library path.")
+                    else:
+                        resolved_song.unlink()
+                        st.success(
+                            f"Deleted '{song.stem}' from the library."
+                        )
+                        st.rerun()
+                except FileNotFoundError:
+                    st.warning("Song was already deleted.")
+                except Exception as exc:
+                    st.error(
+                        "Could not delete the song: "
+                        + clean_error(exc)
+                    )
 
 
 # ============================================================
@@ -2288,8 +2383,7 @@ POWERED BY RACHARLAGPT
 
 **YouTube:** {CHANNEL_URL}
 
-**Privacy:** No public user login or user database
-is required for the main tools.
+**Privacy:** No public user login or app database is required for the main tools. Generated share text is passed to the platform you choose only when you press its share button.
 """
     )
 
@@ -2474,6 +2568,11 @@ POWERED BY RACHARLGPT
 # ============================================================
 # RUN CURRENT PAGE
 # ============================================================
+
+# Safety fallback: prevents a stale/invalid session-state value
+# from causing a KeyError when the app is updated.
+if st.session_state.nav_page not in NAVIGATION:
+    st.session_state.nav_page = "🏠 Home"
 
 NAVIGATION[
     st.session_state.nav_page
