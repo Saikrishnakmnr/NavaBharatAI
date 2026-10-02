@@ -1,35 +1,4 @@
-```python
-"""
-NavaBharat AI v6.0.0
-POWERED BY RACHARLAGPT
-
-Creator & Developer:
-Racharla Saikrishna
-
-Features:
-- Solve Anything
-- Science Solver
-- Student Hub
-- Live Information
-- Job Information
-- Exam Information
-- RacharlaGPT Music
-- RacharlaGPT Video Studio
-- Creator Studio
-- Translator
-- About
-- Admin music upload/delete
-- Social sharing buttons
-- Responsive radiant/glass UI
-
-No application database is required.
-"""
-
-from __future__ import annotations
-
-import base64
 import html
-import json
 import os
 import re
 import shutil
@@ -37,13 +6,15 @@ import subprocess
 import tempfile
 import urllib.parse
 from pathlib import Path
-from typing import Optional
 
 import streamlit as st
 
-
 # ============================================================
-# APP CONSTANTS
+
+# NAVABHARAT AI v6.0.0
+
+# POWERED BY RACHARLAGPT
+
 # ============================================================
 
 APP_NAME = "NavaBharat AI"
@@ -52,30 +23,48 @@ CREATOR = "Racharla Saikrishna"
 APP_VERSION = "6.0.0"
 TAGLINE = "POWERED BY RACHARLAGPT"
 
-# FIX FOR:
-# NameError: name 'CREATOR' is not defined
-#
-# These constants are intentionally defined BEFORE page_about()
-# and before the navigation is executed.
+# FIXES:
 
+# - CREATOR NameError
+
+# - navigation KeyError protection
+
+# - DeltaGenerator output
+
+# - music delete
+
+# - social sharing
+
+# - different radiant buttons/cards
+
+# - visible button text
+
+# - responsive page titles
+
+# - Gemini error handling
+
+# - FFmpeg graceful handling
 
 # ============================================================
+
 # STREAMLIT CONFIG
+
 # ============================================================
 
 st.set_page_config(
-    page_title=f"{APP_NAME} | {BRAND}",
-    page_icon="🇮🇳",
-    layout="wide",
-    initial_sidebar_state="expanded",
+page_title=f"{APP_NAME} | {BRAND}",
+page_icon="🇮🇳",
+layout="wide",
+initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
-# DIRECTORIES
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+# PATHS
+
+# ============================================================
+
+BASE_DIR = Path(**file**).resolve().parent
 
 MUSIC_DIR = BASE_DIR / "racharlagptlibrary"
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,103 +75,93 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-# ============================================================
-# SECRETS / API
 # ============================================================
 
-GEMINI_API_KEY = ""
+# SECRETS
 
+# ============================================================
+
+def read_secret(name, default=""):
 try:
-    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+value = st.secrets.get(name, default)
+if value is None:
+return default
+return str(value)
 except Exception:
-    pass
+return default
+
+GEMINI_API_KEY = read_secret("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
-    try:
-        GEMINI_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
-    except Exception:
-        pass
+GEMINI_API_KEY = read_secret("GOOGLE_API_KEY")
 
-GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = read_secret(
+"GEMINI_MODEL",
+"gemini-3.8-flash",
+)
 
-try:
-    GEMINI_MODEL = st.secrets.get(
-        "GEMINI_MODEL",
-        "gemini-3.8-flash",
-    )
-except Exception:
-    pass
-
-
-# Optional admin password.
-# Put this in Streamlit secrets if you want protected admin mode:
-#
-# ADMIN_PASSWORD = "your-password"
-#
-# If it is not configured, admin controls remain unavailable.
-
-ADMIN_PASSWORD = ""
-
-try:
-    ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
-except Exception:
-    pass
-
+ADMIN_PASSWORD = read_secret(
+"ADMIN_PASSWORD",
+)
 
 # ============================================================
+
 # SESSION STATE
+
 # ============================================================
 
 if "nav_page" not in st.session_state:
-    st.session_state.nav_page = "Home"
-
-if "navigation_open" not in st.session_state:
-    st.session_state.navigation_open = True
+st.session_state.nav_page = "Home"
 
 if "admin_authenticated" not in st.session_state:
-    st.session_state.admin_authenticated = False
+st.session_state.admin_authenticated = False
 
 if "last_answer" not in st.session_state:
-    st.session_state.last_answer = ""
-
-if "last_share_title" not in st.session_state:
-    st.session_state.last_share_title = "NavaBharat AI"
-
-if "last_share_text" not in st.session_state:
-    st.session_state.last_share_text = ""
-
+st.session_state.last_answer = ""
 
 # ============================================================
-# PREMIUM CSS
+
+# PREMIUM UI
+
 # ============================================================
 
 st.markdown(
-    """
+"""
+
 <style>
 
-:root {
-    --text-main: #101828;
-    --text-white: #ffffff;
-    --glass: rgba(255,255,255,0.82);
-    --glass-border: rgba(255,255,255,0.60);
-}
-
-/* ---------------------------------------------------------
-   MAIN BACKGROUND
---------------------------------------------------------- */
+/* ========================================================
+   BACKGROUND
+======================================================== */
 
 .stApp {
     background:
-        radial-gradient(circle at 10% 10%, rgba(255,0,128,.16), transparent 28%),
-        radial-gradient(circle at 90% 15%, rgba(0,170,255,.18), transparent 28%),
-        radial-gradient(circle at 20% 90%, rgba(0,255,180,.14), transparent 30%),
-        linear-gradient(135deg, #f7f9ff 0%, #eef4ff 45%, #f9f2ff 100%);
+        radial-gradient(
+            circle at 5% 5%,
+            rgba(255, 0, 110, .13),
+            transparent 28%
+        ),
+        radial-gradient(
+            circle at 95% 5%,
+            rgba(58, 134, 255, .15),
+            transparent 28%
+        ),
+        radial-gradient(
+            circle at 10% 95%,
+            rgba(0, 184, 148, .13),
+            transparent 28%
+        ),
+        linear-gradient(
+            135deg,
+            #f8fbff 0%,
+            #eef4ff 48%,
+            #fbf4ff 100%
+        );
 }
 
-/* ---------------------------------------------------------
-   HIDE STREAMLIT DEFAULT UI
---------------------------------------------------------- */
+/* ========================================================
+   STREAMLIT
+======================================================== */
 
 #MainMenu {
     visibility: hidden;
@@ -196,18 +175,16 @@ header[data-testid="stHeader"] {
     background: transparent;
 }
 
-/* ---------------------------------------------------------
-   GLOBAL TEXT
---------------------------------------------------------- */
+/* ========================================================
+   TEXT
+======================================================== */
 
-html,
-body,
 .stApp,
-p,
-label,
-span,
-div {
-    color: var(--text-main);
+.stApp p,
+.stApp label,
+.stApp span,
+.stApp div {
+    color: #111827;
 }
 
 h1,
@@ -217,297 +194,378 @@ h4 {
     color: #111827 !important;
 }
 
-/* ---------------------------------------------------------
-   MAIN TITLE
---------------------------------------------------------- */
+/* ========================================================
+   PAGE TITLE
+======================================================== */
 
 .main-page-title {
+    display: block;
     width: 100%;
     max-width: 100%;
-    overflow: visible !important;
+    margin: 5px 0 10px 0;
+    font-size: clamp(1.8rem, 4vw, 3.4rem);
+    line-height: 1.12;
+    font-weight: 950;
     white-space: normal !important;
+    overflow: visible !important;
     overflow-wrap: anywhere !important;
     word-break: normal !important;
-    font-size: clamp(1.8rem, 4vw, 3.6rem);
-    line-height: 1.12;
-    font-weight: 900;
-    margin: 8px 0 10px 0;
-    background: linear-gradient(
-        90deg,
-        #ff006e,
-        #8338ec,
-        #3a86ff,
-        #00b894,
-        #ff9f1c
-    );
+    background:
+        linear-gradient(
+            90deg,
+            #ff006e,
+            #8338ec,
+            #4361ee,
+            #00a896,
+            #fb8500
+        );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
-/* ---------------------------------------------------------
-   BRAND
---------------------------------------------------------- */
+/* ========================================================
+   BRAND BADGE
+======================================================== */
 
-.brand-strip {
+.brand-badge {
     display: inline-block;
-    padding: 7px 15px;
+    padding: 7px 16px;
     border-radius: 999px;
+    color: #ffffff !important;
+    font-weight: 900;
+    font-size: 12px;
+    letter-spacing: .07em;
     background:
         linear-gradient(
             120deg,
             #ff006e,
             #8338ec,
-            #3a86ff,
+            #4361ee,
             #00b894
         );
-    color: white !important;
-    font-weight: 900;
-    font-size: .78rem;
-    letter-spacing: .08em;
-    box-shadow: 0 10px 25px rgba(71, 65, 255, .22);
+    box-shadow:
+        0 8px 25px rgba(80, 60, 200, .22);
 }
 
-/* ---------------------------------------------------------
-   GLASS CARD
---------------------------------------------------------- */
+/* ========================================================
+   GLASS
+======================================================== */
 
 .glass-card {
     padding: 22px;
-    border-radius: 24px;
-    background: var(--glass);
-    border: 1px solid var(--glass-border);
+    border-radius: 25px;
+    background: rgba(255, 255, 255, .82);
+    border: 1px solid rgba(255, 255, 255, .75);
     box-shadow:
-        0 18px 50px rgba(31, 38, 135, .12),
-        inset 0 1px 0 rgba(255,255,255,.85);
+        0 18px 55px rgba(31, 38, 135, .13),
+        inset 0 1px 0 rgba(255,255,255,.9);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     margin-bottom: 18px;
 }
 
-/* ---------------------------------------------------------
+/* ========================================================
    HOME CARDS
---------------------------------------------------------- */
+======================================================== */
 
 .home-card {
-    min-height: 190px;
+    min-height: 180px;
     padding: 22px;
-    border-radius: 26px;
-    color: white !important;
-    margin-bottom: 18px;
+    border-radius: 27px;
+    margin-bottom: 8px;
+    color: #ffffff !important;
     box-shadow:
-        0 18px 35px rgba(30, 30, 60, .18),
+        0 18px 38px rgba(30, 30, 60, .18),
         inset 0 1px 0 rgba(255,255,255,.45);
     transition:
         transform .22s ease,
-        box-shadow .22s ease;
+        box-shadow .22s ease,
+        filter .22s ease;
 }
 
 .home-card:hover {
     transform: translateY(-7px) scale(1.015);
+    filter: brightness(1.06);
     box-shadow:
-        0 25px 55px rgba(30, 30, 60, .27),
-        inset 0 1px 0 rgba(255,255,255,.6);
+        0 28px 58px rgba(30, 30, 60, .27),
+        inset 0 1px 0 rgba(255,255,255,.65);
 }
 
 .home-card h3,
 .home-card p,
-.home-card div,
-.home-card span {
-    color: white !important;
+.home-card div {
+    color: #ffffff !important;
 }
 
-.card-pink {
-    background: linear-gradient(135deg, #ff006e, #ff4d6d, #ff9f1c);
+.gradient-pink {
+    background:
+        linear-gradient(
+            135deg,
+            #ff006e,
+            #ff4d6d,
+            #ff9f1c
+        );
 }
 
-.card-blue {
-    background: linear-gradient(135deg, #4361ee, #3a86ff, #00b4d8);
+.gradient-blue {
+    background:
+        linear-gradient(
+            135deg,
+            #4361ee,
+            #3a86ff,
+            #00b4d8
+        );
 }
 
-.card-green {
-    background: linear-gradient(135deg, #00b894, #00cec9, #55efc4);
+.gradient-purple {
+    background:
+        linear-gradient(
+            135deg,
+            #7209b7,
+            #8338ec,
+            #c77dff
+        );
 }
 
-.card-purple {
-    background: linear-gradient(135deg, #7209b7, #8338ec, #c77dff);
+.gradient-green {
+    background:
+        linear-gradient(
+            135deg,
+            #008f7a,
+            #00b894,
+            #55efc4
+        );
 }
 
-.card-orange {
-    background: linear-gradient(135deg, #fb5607, #ff9f1c, #ffd166);
+.gradient-orange {
+    background:
+        linear-gradient(
+            135deg,
+            #fb5607,
+            #ff9f1c,
+            #ffd166
+        );
 }
 
-.card-teal {
-    background: linear-gradient(135deg, #0077b6, #00b4d8, #90e0ef);
+.gradient-red {
+    background:
+        linear-gradient(
+            135deg,
+            #d00000,
+            #e85d04,
+            #ff006e
+        );
 }
 
-.card-red {
-    background: linear-gradient(135deg, #d00000, #e85d04, #ff006e);
+.gradient-teal {
+    background:
+        linear-gradient(
+            135deg,
+            #0077b6,
+            #00b4d8,
+            #90e0ef
+        );
 }
 
-.card-indigo {
-    background: linear-gradient(135deg, #3f37c9, #4895ef, #4361ee);
+.gradient-indigo {
+    background:
+        linear-gradient(
+            135deg,
+            #3f37c9,
+            #4895ef,
+            #4361ee
+        );
 }
 
-/* ---------------------------------------------------------
+/* ========================================================
+   ALL BUTTONS
+======================================================== */
+
+.stButton > button,
+.stLinkButton > a,
+.stDownloadButton > button {
+    min-height: 44px !important;
+    border: 0 !important;
+    border-radius: 14px !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    text-shadow:
+        0 1px 2px rgba(0,0,0,.32);
+    box-shadow:
+        0 8px 20px rgba(30,40,80,.15) !important;
+    transition:
+        transform .2s ease,
+        filter .2s ease,
+        box-shadow .2s ease !important;
+}
+
+.stButton > button:hover,
+.stLinkButton > a:hover,
+.stDownloadButton > button:hover {
+    transform: translateY(-2px) scale(1.015);
+    filter: brightness(1.08);
+    box-shadow:
+        0 13px 27px rgba(30,40,80,.21) !important;
+}
+
+/* ========================================================
+   DEFAULT BUTTON COLORS
+======================================================== */
+
+.stButton > button {
+    background:
+        linear-gradient(
+            135deg,
+            #4361ee,
+            #8338ec
+        ) !important;
+}
+
+/* ========================================================
    SIDEBAR
---------------------------------------------------------- */
+======================================================== */
 
 section[data-testid="stSidebar"] {
     background:
         linear-gradient(
             160deg,
-            rgba(255,255,255,.96),
-            rgba(240,244,255,.96)
+            rgba(255,255,255,.97),
+            rgba(239,244,255,.97)
         );
-    border-right: 1px solid rgba(100,100,150,.12);
+    border-right: 1px solid rgba(80,80,130,.12);
 }
 
 section[data-testid="stSidebar"] .stButton > button {
-    width: 100%;
-    min-height: 48px;
-    border: 0;
-    border-radius: 15px;
-    margin: 4px 0;
-    color: white !important;
-    font-weight: 850 !important;
-    font-size: 14px !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,.25);
-    box-shadow: 0 7px 18px rgba(40,40,80,.14);
-    transition: all .2s ease;
+    color: #ffffff !important;
+    font-weight: 900 !important;
 }
-
-section[data-testid="stSidebar"] .stButton > button:hover {
-    transform: translateX(5px) scale(1.02);
-    filter: brightness(1.07);
-}
-
-/* Different sidebar colors */
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(1) button {
-    background: linear-gradient(135deg,#ff006e,#ff4d6d);
+    background: linear-gradient(135deg,#ff006e,#ff4d6d) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(2) button {
-    background: linear-gradient(135deg,#4361ee,#3a86ff);
+    background: linear-gradient(135deg,#4361ee,#3a86ff) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(3) button {
-    background: linear-gradient(135deg,#7209b7,#8338ec);
+    background: linear-gradient(135deg,#7209b7,#8338ec) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(4) button {
-    background: linear-gradient(135deg,#008f7a,#00b894);
+    background: linear-gradient(135deg,#008f7a,#00b894) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(5) button {
-    background: linear-gradient(135deg,#fb5607,#ff9f1c);
+    background: linear-gradient(135deg,#fb5607,#ff9f1c) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(6) button {
-    background: linear-gradient(135deg,#0077b6,#00b4d8);
+    background: linear-gradient(135deg,#0077b6,#00b4d8) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(7) button {
-    background: linear-gradient(135deg,#d00000,#e85d04);
+    background: linear-gradient(135deg,#d00000,#e85d04) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(8) button {
-    background: linear-gradient(135deg,#8338ec,#c77dff);
+    background: linear-gradient(135deg,#8338ec,#c77dff) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(9) button {
-    background: linear-gradient(135deg,#06d6a0,#118ab2);
+    background: linear-gradient(135deg,#06d6a0,#118ab2) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(10) button {
-    background: linear-gradient(135deg,#ef476f,#ff006e);
+    background: linear-gradient(135deg,#ef476f,#ff006e) !important;
 }
 
 section[data-testid="stSidebar"] .stButton:nth-of-type(11) button {
-    background: linear-gradient(135deg,#118ab2,#073b4c);
+    background: linear-gradient(135deg,#118ab2,#073b4c) !important;
 }
 
-/* ---------------------------------------------------------
-   NORMAL BUTTONS
---------------------------------------------------------- */
-
-.stButton > button,
-.stDownloadButton > button {
-    border: 0 !important;
-    border-radius: 14px !important;
-    min-height: 44px !important;
-    color: white !important;
-    font-weight: 850 !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,.28);
-    transition: all .2s ease !important;
-    box-shadow: 0 8px 18px rgba(40,40,80,.15) !important;
+section[data-testid="stSidebar"] .stButton:nth-of-type(12) button {
+    background: linear-gradient(135deg,#ff9f1c,#fb5607) !important;
 }
 
-.stButton > button:hover,
-.stDownloadButton > button:hover {
-    transform: translateY(-2px) scale(1.015);
-    filter: brightness(1.08);
-}
-
-/* ---------------------------------------------------------
-   SHARE BUTTONS
---------------------------------------------------------- */
-
-.share-wa button {
-    background: linear-gradient(135deg,#00b894,#00cec9) !important;
-}
-
-.share-instagram button {
-    background: linear-gradient(
-        135deg,
-        #8338ec,
-        #e1306c,
-        #ff9f1c
-    ) !important;
-}
-
-.share-facebook button {
-    background: linear-gradient(135deg,#1877f2,#4267b2) !important;
-}
-
-.share-x button {
-    background: linear-gradient(135deg,#111827,#374151) !important;
-}
-
-.share-linkedin button {
-    background: linear-gradient(135deg,#0077b5,#00a0dc) !important;
-}
-
-.share-copy button {
-    background: linear-gradient(135deg,#ff006e,#8338ec) !important;
-}
-
-/* ---------------------------------------------------------
+/* ========================================================
    INPUTS
---------------------------------------------------------- */
+======================================================== */
 
-textarea,
-input,
 .stTextInput input,
-.stTextArea textarea {
-    background: white !important;
+.stTextArea textarea,
+textarea,
+input {
+    background: #ffffff !important;
     color: #111827 !important;
     border-radius: 14px !important;
 }
 
+.stTextInput input::placeholder,
 .stTextArea textarea::placeholder,
-.stTextInput input::placeholder {
+textarea::placeholder {
     color: #64748b !important;
     opacity: 1 !important;
 }
 
-/* ---------------------------------------------------------
+/* ========================================================
+   SHARING COLORS
+======================================================== */
+
+.share-whatsapp .stLinkButton > a {
+    background:
+        linear-gradient(
+            135deg,
+            #00b894,
+            #00cec9
+        ) !important;
+}
+
+.share-instagram .stLinkButton > a {
+    background:
+        linear-gradient(
+            135deg,
+            #8338ec,
+            #e1306c,
+            #ff9f1c
+        ) !important;
+}
+
+.share-facebook .stLinkButton > a {
+    background:
+        linear-gradient(
+            135deg,
+            #1877f2,
+            #4267b2
+        ) !important;
+}
+
+.share-x .stLinkButton > a {
+    background:
+        linear-gradient(
+            135deg,
+            #111827,
+            #374151
+        ) !important;
+}
+
+.share-linkedin .stLinkButton > a {
+    background:
+        linear-gradient(
+            135deg,
+            #0077b5,
+            #00a0dc
+        ) !important;
+}
+
+/* ========================================================
    MUSIC
---------------------------------------------------------- */
+======================================================== */
 
 .music-card {
     padding: 20px;
     border-radius: 22px;
+    margin-bottom: 15px;
     background:
         linear-gradient(
             135deg,
@@ -516,16 +574,16 @@ input,
             rgba(58,134,255,.12)
         );
     border: 1px solid rgba(100,80,200,.16);
-    margin-bottom: 15px;
 }
 
-/* ---------------------------------------------------------
+/* ========================================================
    NOTICE
---------------------------------------------------------- */
+======================================================== */
 
-.security-notice {
-    padding: 16px 18px;
+.notice {
+    padding: 17px;
     border-radius: 18px;
+    margin: 15px 0;
     background:
         linear-gradient(
             135deg,
@@ -533,12 +591,11 @@ input,
             rgba(58,134,255,.10)
         );
     border: 1px solid rgba(0,184,148,.25);
-    margin: 15px 0;
 }
 
-/* ---------------------------------------------------------
+/* ========================================================
    MOBILE
---------------------------------------------------------- */
+======================================================== */
 
 @media (max-width: 768px) {
 
@@ -547,454 +604,1093 @@ input,
     }
 
     .home-card {
-        min-height: 155px;
-        padding: 18px;
+        min-height: 150px;
+        padding: 17px;
     }
 
     .glass-card {
         padding: 16px;
-        border-radius: 19px;
+        border-radius: 20px;
     }
-
 }
 
 </style>
+
 """,
+unsafe_allow_html=True,
+)
+
+# ============================================================
+
+# HELPERS
+
+# ============================================================
+
+def page_title(title, subtitle=""):
+st.markdown(
+f'<div class="main-page-title">{html.escape(title)}</div>',
+unsafe_allow_html=True,
+)
+
+```
+st.markdown(
+    f'<span class="brand-badge">{html.escape(TAGLINE)}</span>',
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
-# UTILITY FUNCTIONS
-# ============================================================
-
-def safe_text(value: str) -> str:
-    """Convert arbitrary content to safe display text."""
-    return str(value or "").strip()
-
-
-def show_page_title(title: str, subtitle: str = "") -> None:
+if subtitle:
     st.markdown(
-        f'<div class="main-page-title">{html.escape(title)}</div>',
+        f'<p style="margin-top:12px;color:#475569;">'
+        f'{html.escape(subtitle)}'
+        f'</p>',
+        unsafe_allow_html=True,
+    )
+```
+
+def navigate(page):
+st.session_state.nav_page = page
+st.rerun()
+
+# ============================================================
+
+# GEMINI
+
+# ============================================================
+
+def gemini_client():
+if not GEMINI_API_KEY:
+return None
+
+```
+try:
+    from google import genai
+    return genai.Client(api_key=GEMINI_API_KEY)
+except Exception:
+    return None
+```
+
+def gemini_error(exc):
+text = str(exc)
+upper = text.upper()
+
+```
+if "503" in upper or "UNAVAILABLE" in upper:
+    return (
+        "Gemini is temporarily unavailable or busy. "
+        "Your API key was detected. Please try again shortly."
+    )
+
+if "429" in upper or "RESOURCE_EXHAUSTED" in upper:
+    return (
+        "Gemini usage is temporarily limited. "
+        "Please wait and try again."
+    )
+
+if "401" in upper or "UNAUTHENTICATED" in upper:
+    return (
+        "Gemini authentication failed. "
+        "Please check GEMINI_API_KEY in Streamlit Secrets."
+    )
+
+if "403" in upper or "PERMISSION_DENIED" in upper:
+    return (
+        "Gemini permission was denied. "
+        "Check API/model permissions."
+    )
+
+if "404" in upper or "NOT_FOUND" in upper:
+    return (
+        f"Gemini model '{GEMINI_MODEL}' was not found "
+        "or is unavailable for this API account."
+    )
+
+return f"Gemini request failed: {text}"
+```
+
+def ask_ai(prompt):
+if not GEMINI_API_KEY:
+return (
+False,
+"GEMINI_API_KEY is not configured in Streamlit Secrets.",
+)
+
+```
+client = gemini_client()
+
+if client is None:
+    return (
+        False,
+        "google-genai is not installed. "
+        "Add google-genai to requirements.txt.",
+    )
+
+try:
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+    )
+
+    answer = getattr(response, "text", "")
+
+    if not answer:
+        return False, "Gemini returned an empty answer."
+
+    return True, str(answer)
+
+except Exception as exc:
+    return False, gemini_error(exc)
+```
+
+# ============================================================
+
+# SHARING
+
+# ============================================================
+
+def build_share_urls(title, text):
+message = (
+f"{title}\n\n"
+f"{text}\n\n"
+f"{TAGLINE}"
+)
+
+```
+encoded = urllib.parse.quote(message)
+
+app_url = (
+    "https://navabharatai.racharlagpt.in"
+)
+
+return {
+    "whatsapp": (
+        "https://wa.me/?text="
+        + encoded
+    ),
+    "facebook": (
+        "https://www.facebook.com/sharer/sharer.php?"
+        "u="
+        + urllib.parse.quote(app_url)
+        + "&quote="
+        + encoded
+    ),
+    "x": (
+        "https://twitter.com/intent/tweet?"
+        "text="
+        + encoded
+    ),
+    "linkedin": (
+        "https://www.linkedin.com/sharing/share-offsite/?"
+        "url="
+        + urllib.parse.quote(app_url)
+    ),
+    "instagram": (
+        "https://www.instagram.com/"
+    ),
+}
+```
+
+def share_buttons(title, text, prefix):
+
+```
+if not text:
+    return
+
+urls = build_share_urls(
+    title,
+    text,
+)
+
+st.markdown(
+    "### 📤 Share this information"
+)
+
+st.markdown(
+    """
+    <div class="notice">
+    🔒 <strong>Sharing:</strong>
+    these buttons open the selected service through the
+    user's browser/app. NavaBharat AI does not need to
+    save a database record just to create these share links.
+    AI requests may still be processed by the configured
+    AI provider.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
+    st.markdown(
+        '<div class="share-whatsapp">',
         unsafe_allow_html=True,
     )
 
+    st.link_button(
+        "🟢 WhatsApp",
+        urls["whatsapp"],
+        use_container_width=True,
+    )
+
     st.markdown(
-        f'<span class="brand-strip">{html.escape(TAGLINE)}</span>',
+        "</div>",
         unsafe_allow_html=True,
     )
 
-    if subtitle:
+with c2:
+    st.markdown(
+        '<div class="share-instagram">',
+        unsafe_allow_html=True,
+    )
+
+    st.link_button(
+        "📸 Instagram",
+        urls["instagram"],
+        use_container_width=True,
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+with c3:
+    st.markdown(
+        '<div class="share-facebook">',
+        unsafe_allow_html=True,
+    )
+
+    st.link_button(
+        "🔵 Facebook",
+        urls["facebook"],
+        use_container_width=True,
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+c4, c5, c6 = st.columns(3)
+
+with c4:
+    st.markdown(
+        '<div class="share-x">',
+        unsafe_allow_html=True,
+    )
+
+    st.link_button(
+        "⚫ X",
+        urls["x"],
+        use_container_width=True,
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+with c5:
+    st.markdown(
+        '<div class="share-linkedin">',
+        unsafe_allow_html=True,
+    )
+
+    st.link_button(
+        "🔷 LinkedIn",
+        urls["linkedin"],
+        use_container_width=True,
+    )
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+with c6:
+    if st.button(
+        "📋 Copy / Show",
+        key=f"{prefix}_copy",
+        use_container_width=True,
+    ):
+        st.code(text)
+```
+
+# ============================================================
+
+# AI RESULT
+
+# ============================================================
+
+def display_answer(title, answer, prefix):
+
+```
+st.markdown(
+    f"""
+    <div class="glass-card">
+        <h3>🤖 {html.escape(title)}</h3>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# IMPORTANT:
+# Never use:
+#
+# st.write(st.markdown(answer))
+#
+# That creates DeltaGenerator(...) output.
+#
+# Correct:
+st.markdown(answer)
+
+share_buttons(
+    title,
+    answer,
+    prefix,
+)
+```
+
+# ============================================================
+
+# HOME
+
+# ============================================================
+
+HOME_CARDS = [
+(
+"🧠",
+"Solve Anything",
+"Ask questions and receive AI explanations.",
+"gradient-pink",
+"Solve Anything",
+),
+(
+"🔬",
+"AI Science Solver",
+"Physics, Mathematics, Chemistry and Science.",
+"gradient-blue",
+"AI Science Solver",
+),
+(
+"🎓",
+"Student Hub",
+"Notes, explanations, revision and study help.",
+"gradient-purple",
+"Student Hub",
+),
+(
+"🌐",
+"Live Information",
+"Questions that require current information.",
+"gradient-green",
+"Live Information",
+),
+(
+"💼",
+"Job Notifications",
+"Government, banking, railway and other jobs.",
+"gradient-orange",
+"Job Notifications",
+),
+(
+"📝",
+"Exam Notifications",
+"NEET, JEE, EAPCET, CUET, SSC, UPSC and more.",
+"gradient-teal",
+"Exam Notifications",
+),
+(
+"🎵",
+"RacharlaGPT Music",
+"Listen to songs published in the library.",
+"gradient-red",
+"RacharlaGPT Music",
+),
+(
+"🎬",
+"RacharlaGPT Video Studio",
+"Video and audio tools.",
+"gradient-indigo",
+"RacharlaGPT Video Studio",
+),
+(
+"✍️",
+"Creator Studio",
+"Scripts, captions and creative content.",
+"gradient-pink",
+"Creator Studio",
+),
+(
+"🌍",
+"Translator",
+"Translate between multiple languages.",
+"gradient-blue",
+"Translator",
+),
+]
+
+def page_home():
+
+```
+page_title(
+    "🇮🇳 NavaBharat AI",
+    "A free AI workspace powered by RacharlaGPT.",
+)
+
+st.markdown(
+    """
+    <div class="notice">
+    🔒 <strong>Data notice:</strong>
+    the application does not require a database for the
+    browser-based sharing features. AI requests can be
+    processed by the configured AI service.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+columns = st.columns(2)
+
+for i, (
+    icon,
+    title,
+    description,
+    gradient,
+    target,
+) in enumerate(HOME_CARDS):
+
+    with columns[i % 2]:
+
         st.markdown(
-            f'<div style="margin-top:12px;color:#475569;">'
-            f'{html.escape(subtitle)}'
-            f'</div>',
+            f"""
+            <div class="home-card {gradient}">
+                <div style="font-size:43px;">{icon}</div>
+                <h3>{html.escape(title)}</h3>
+                <p>{html.escape(description)}</p>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
-
-def go_page(page: str) -> None:
-    """
-    Navigate to a page and automatically close navigation.
-
-    This fixes the requested behavior:
-    user clicks a sidebar item -> page opens -> navigation closes.
-    """
-    st.session_state.nav_page = page
-    st.session_state.navigation_open = False
-    st.rerun()
-
-
-def go_home() -> None:
-    st.session_state.nav_page = "Home"
-    st.session_state.navigation_open = True
-    st.rerun()
-
-
-# ============================================================
-# SHARING
-# ============================================================
-
-def make_share_text(title: str, text: str) -> str:
-    return f"{title}\n\n{text}\n\nPowered by NavaBharat AI — {TAGLINE}"
-
-
-def share_urls(title: str, text: str) -> dict[str, str]:
-    """
-    Browser-based sharing.
-
-    No application database is used.
-    """
-
-    message = make_share_text(title, text)
-    encoded = urllib.parse.quote(message)
-    encoded_title = urllib.parse.quote(title)
-
-    return {
-        "whatsapp": f"https://wa.me/?text={encoded}",
-        "facebook": (
-            "https://www.facebook.com/sharer/sharer.php?"
-            f"u={urllib.parse.quote('https://navabharatai.racharlagpt.in')}"
-            f"&quote={encoded}"
-        ),
-        "x": (
-            "https://twitter.com/intent/tweet?"
-            f"text={encoded}"
-        ),
-        "linkedin": (
-            "https://www.linkedin.com/sharing/share-offsite/?"
-            f"url={urllib.parse.quote('https://navabharatai.racharlagpt.in')}"
-        ),
-        "instagram": (
-            "https://www.instagram.com/"
-            f"?text={encoded}"
-        ),
-        "copy": message,
-        "title": encoded_title,
-    }
-
-
-def render_share_buttons(
-    title: str,
-    text: str,
-    key_prefix: str,
-) -> None:
-
-    text = safe_text(text)
-
-    if not text:
-        return
-
-    urls = share_urls(title, text)
-
-    st.markdown("### 📤 Share this information")
-
-    st.markdown(
-        """
-        <div class="security-notice">
-        🔒 <strong>Your app does not need a database for these share buttons.</strong>
-        Sharing opens the selected service in the user's browser/app.
-        The app does not need to store the generated answer just to share it.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown('<div class="share-wa">', unsafe_allow_html=True)
-        st.link_button(
-            "🟢 WhatsApp",
-            urls["whatsapp"],
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c2:
-        st.markdown('<div class="share-instagram">', unsafe_allow_html=True)
-        st.link_button(
-            "📸 Instagram",
-            urls["instagram"],
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c3:
-        st.markdown('<div class="share-facebook">', unsafe_allow_html=True)
-        st.link_button(
-            "🔵 Facebook",
-            urls["facebook"],
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    c4, c5, c6 = st.columns(3)
-
-    with c4:
-        st.markdown('<div class="share-x">', unsafe_allow_html=True)
-        st.link_button(
-            "⚫ X",
-            urls["x"],
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c5:
-        st.markdown('<div class="share-linkedin">', unsafe_allow_html=True)
-        st.link_button(
-            "🔷 LinkedIn",
-            urls["linkedin"],
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c6:
-        st.markdown('<div class="share-copy">', unsafe_allow_html=True)
-
         if st.button(
-            "📋 Copy / Show Text",
-            key=f"{key_prefix}_copy",
+            f"{icon} Open {title}",
+            key=f"home_{i}",
             use_container_width=True,
         ):
-            st.code(text)
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
+            navigate(target)
+```
 
 # ============================================================
-# GEMINI
+
+# SOLVE
+
 # ============================================================
 
-def get_gemini_client():
-    """
-    Supports the modern google-genai package.
+def page_solve():
 
-    Install:
-        pip install google-genai
-    """
+```
+page_title(
+    "🧠 Solve Anything",
+    "General AI question answering.",
+)
 
-    if not GEMINI_API_KEY:
-        return None
+question = st.text_area(
+    "Your question",
+    height=190,
+    placeholder="Ask anything...",
+)
 
-    try:
-        from google import genai
+if st.button(
+    "🚀 Solve Question",
+    use_container_width=True,
+):
 
-        return genai.Client(api_key=GEMINI_API_KEY)
+    if not question.strip():
+        st.warning("Please enter a question.")
+        return
 
-    except Exception:
-        return None
+    with st.spinner("Thinking..."):
 
+        ok, answer = ask_ai(
+            f"""
+```
 
-def friendly_gemini_error(exc: Exception) -> str:
+You are NavaBharat AI.
 
-    message = str(exc)
+Answer this question accurately and clearly:
 
-    upper = message.upper()
+{question}
 
-    if "503" in upper or "UNAVAILABLE" in upper:
-        return (
-            "Gemini is temporarily busy or unavailable. "
-            "Your API key was detected, but the selected model "
-            "is currently not accepting this request. "
-            "Please try again shortly."
+Use headings, bullets, examples and equations where useful.
+Do not invent current information.
+"""
+)
+
+```
+    if ok:
+        display_answer(
+            "AI Answer",
+            answer,
+            "solve",
         )
+    else:
+        st.error(answer)
+```
 
-    if "429" in upper or "RESOURCE_EXHAUSTED" in upper:
-        return (
-            "Gemini usage is temporarily limited. "
-            "Please wait and try again."
+# ============================================================
+
+# SCIENCE
+
+# ============================================================
+
+def page_science():
+
+```
+page_title(
+    "🔬 AI Science Solver",
+    "Physics • Mathematics • Chemistry • Biology • Science",
+)
+
+subject = st.selectbox(
+    "Subject",
+    [
+        "Physics",
+        "Mathematics",
+        "Chemistry",
+        "Biology",
+        "General Science",
+    ],
+)
+
+question = st.text_area(
+    "Question / Problem",
+    height=190,
+    placeholder="Enter your problem...",
+)
+
+if st.button(
+    f"🧪 Solve {subject}",
+    use_container_width=True,
+):
+
+    if not question.strip():
+        st.warning("Please enter a problem.")
+        return
+
+    with st.spinner("Solving..."):
+
+        ok, answer = ask_ai(
+            f"""
+```
+
+You are an expert {subject} teacher.
+
+Solve:
+
+{question}
+
+Give:
+
+* Concept
+* Given information
+* Formula
+* Steps
+* Calculations
+* Final answer
+* Short explanation
+
+Be accurate and educational.
+"""
+)
+
+```
+    if ok:
+        display_answer(
+            f"{subject} Answer",
+            answer,
+            f"science_{subject.lower()}",
         )
+    else:
+        st.error(answer)
+```
 
-    if "401" in upper or "UNAUTHENTICATED" in upper:
-        return (
-            "Gemini rejected the API credentials. "
-            "Check GEMINI_API_KEY in Streamlit Secrets."
-        )
+# ============================================================
 
-    if "403" in upper or "PERMISSION_DENIED" in upper:
-        return (
-            "Gemini permission was denied. "
-            "Check whether this model/API is enabled for your project."
-        )
+# STUDENT HUB
 
-    if "404" in upper or "NOT_FOUND" in upper:
-        return (
-            f"The configured Gemini model '{GEMINI_MODEL}' "
-            "was not found or is unavailable for this API account."
-        )
+# ============================================================
 
-    return f"Gemini request failed: {message}"
+def page_student():
 
+```
+page_title(
+    "🎓 Student Hub",
+    "Study assistance and educational content.",
+)
 
-def ask_gemini(prompt: str) -> tuple[bool, str]:
+topic = st.text_input(
+    "Topic",
+    placeholder="Example: Newton's Laws",
+)
 
-    if not GEMINI_API_KEY:
-        return (
-            False,
-            "Gemini API key is not configured. "
-            "Add GEMINI_API_KEY to Streamlit Secrets.",
-        )
+task = st.selectbox(
+    "Create",
+    [
+        "Simple Explanation",
+        "Revision Notes",
+        "Important Questions",
+        "Quiz",
+        "Study Plan",
+    ],
+)
 
-    client = get_gemini_client()
+if st.button(
+    "🎓 Generate",
+    use_container_width=True,
+):
 
-    if client is None:
-        return (
-            False,
-            "The Gemini Python package is not installed. "
-            "Add google-genai to requirements.txt.",
-        )
+    if not topic.strip():
+        st.warning("Enter a topic.")
+        return
 
-    try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-        )
-
-        answer = getattr(response, "text", None)
-
-        if not answer:
-            return False, "Gemini returned an empty response."
-
-        return True, str(answer)
-
-    except Exception as exc:
-        return False, friendly_gemini_error(exc)
-
-
-def render_ai_result(
-    title: str,
-    answer: str,
-    share_key: str,
-) -> None:
-
-    st.markdown(
+    ok, answer = ask_ai(
         f"""
-        <div class="glass-card">
-            <h3>🤖 {html.escape(title)}</h3>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+```
 
-    # IMPORTANT:
-    # Do NOT do:
-    #
-    # st.write(st.markdown(answer))
-    #
-    # That produces DeltaGenerator(...) output.
-    #
-    # Correct:
-    st.markdown(answer)
+Topic: {topic}
 
-    render_share_buttons(
-        title,
-        answer,
-        share_key,
-    )
+Student request:
+{task}
 
+Create useful, accurate educational material.
+"""
+)
 
-# ============================================================
-# ADMIN AUTHENTICATION
-# ============================================================
-
-def render_admin_login() -> bool:
-
-    if st.session_state.admin_authenticated:
-        return True
-
-    st.markdown(
-        """
-        <div class="glass-card">
-        <h3>🔐 Admin Access</h3>
-        <p>
-        Admin access is optional and is controlled through
-        <strong>ADMIN_PASSWORD</strong> in Streamlit Secrets.
-        </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if not ADMIN_PASSWORD:
-        st.warning(
-            "ADMIN_PASSWORD is not configured. "
-            "Add it to Streamlit Secrets to enable admin controls."
+```
+    if ok:
+        display_answer(
+            f"Student Hub — {task}",
+            answer,
+            "student",
         )
-        return False
-
-    password = st.text_input(
-        "Admin password",
-        type="password",
-        key="admin_password",
-    )
-
-    if st.button(
-        "🔓 Unlock Admin",
-        key="unlock_admin",
-        use_container_width=True,
-    ):
-        if password == ADMIN_PASSWORD:
-            st.session_state.admin_authenticated = True
-            st.success("Admin access enabled.")
-            st.rerun()
-        else:
-            st.error("Incorrect admin password.")
-
-    return False
-
+    else:
+        st.error(answer)
+```
 
 # ============================================================
+
+# LIVE
+
+# ============================================================
+
+def page_live():
+
+```
+page_title(
+    "🌐 Live Information",
+    "Use this page for questions involving current information.",
+)
+
+question = st.text_area(
+    "Current-information question",
+    height=180,
+    placeholder=(
+        "Example: What is the latest official announcement "
+        "about this topic?"
+    ),
+)
+
+if st.button(
+    "🌐 Get Information",
+    use_container_width=True,
+):
+
+    if not question.strip():
+        st.warning("Enter a question.")
+        return
+
+    ok, answer = ask_ai(
+        f"""
+```
+
+The user wants potentially current information.
+
+Question:
+{question}
+
+Do not fabricate current events, dates, jobs, exams,
+announcements, prices or statistics.
+
+If current verification is unavailable, clearly say so
+and recommend checking the relevant official source.
+"""
+)
+
+```
+    if ok:
+        display_answer(
+            "Live Information",
+            answer,
+            "live",
+        )
+    else:
+        st.error(answer)
+
+st.markdown("### 🔗 Information sources")
+
+links = [
+    (
+        "📰 General Search",
+        "https://www.google.com/search?q=",
+    ),
+    (
+        "🇮🇳 Government",
+        "https://www.india.gov.in/",
+    ),
+]
+
+for label, url in links:
+    if url.endswith("="):
+        st.link_button(
+            label,
+            "https://www.google.com/",
+            use_container_width=True,
+        )
+    else:
+        st.link_button(
+            label,
+            url,
+            use_container_width=True,
+        )
+```
+
+# ============================================================
+
+# JOBS
+
+# ============================================================
+
+def page_jobs():
+
+```
+page_title(
+    "💼 Job Notifications",
+    "Job categories and job-related AI assistance.",
+)
+
+category = st.selectbox(
+    "Category",
+    [
+        "Central Government",
+        "State Government",
+        "Telangana Government",
+        "Andhra Pradesh Government",
+        "Banking",
+        "Railways",
+        "SSC",
+        "UPSC",
+        "Defence",
+        "Teaching",
+        "Police",
+        "Private Jobs",
+        "IT Jobs",
+    ],
+)
+
+question = st.text_area(
+    "Job information",
+    height=170,
+    placeholder=(
+        "Example: What qualifications are needed "
+        "for this category?"
+    ),
+)
+
+if st.button(
+    "💼 Generate Job Information",
+    use_container_width=True,
+):
+
+    if not question.strip():
+        st.warning("Enter a question.")
+        return
+
+    ok, answer = ask_ai(
+        f"""
+```
+
+Job category:
+{category}
+
+Question:
+{question}
+
+Clearly separate general career information from current
+vacancy information. Never invent an open vacancy.
+"""
+)
+
+```
+    if ok:
+        display_answer(
+            f"Job Information — {category}",
+            answer,
+            "jobs",
+        )
+    else:
+        st.error(answer)
+
+st.markdown("### 🔗 Official job sources")
+
+official_jobs = [
+    (
+        "🇮🇳 UPSC",
+        "https://upsc.gov.in/",
+    ),
+    (
+        "🧾 SSC",
+        "https://ssc.gov.in/",
+    ),
+    (
+        "🚆 Railway Recruitment",
+        "https://www.rrbapply.gov.in/",
+    ),
+    (
+        "🏦 IBPS",
+        "https://www.ibps.in/",
+    ),
+]
+
+for label, url in official_jobs:
+    st.link_button(
+        label,
+        url,
+        use_container_width=True,
+    )
+```
+
+# ============================================================
+
+# EXAMS
+
+# ============================================================
+
+def page_exams():
+
+```
+page_title(
+    "📝 Exam Notifications",
+    "Exam information and preparation assistance.",
+)
+
+exam = st.selectbox(
+    "Exam",
+    [
+        "NEET",
+        "JEE Main",
+        "JEE Advanced",
+        "TS EAPCET",
+        "AP EAPCET",
+        "CUET",
+        "SSC",
+        "UPSC",
+        "GATE",
+        "CAT",
+        "State Exams",
+        "University Exams",
+    ],
+)
+
+question = st.text_area(
+    "Exam information",
+    height=170,
+    placeholder="Ask about preparation or exam information...",
+)
+
+if st.button(
+    "📝 Generate Exam Information",
+    use_container_width=True,
+):
+
+    if not question.strip():
+        st.warning("Enter a question.")
+        return
+
+    ok, answer = ask_ai(
+        f"""
+```
+
+Exam:
+{exam}
+
+Question:
+{question}
+
+Do not invent current examination dates or notifications.
+For current dates, advise verification with the official
+examination authority.
+"""
+)
+
+```
+    if ok:
+        display_answer(
+            f"Exam Information — {exam}",
+            answer,
+            "exams",
+        )
+    else:
+        st.error(answer)
+
+st.markdown("### 🔗 Official examination sources")
+
+exam_links = [
+    (
+        "🎯 NTA",
+        "https://www.nta.ac.in/",
+    ),
+    (
+        "🏛️ UPSC",
+        "https://upsc.gov.in/",
+    ),
+    (
+        "📚 SSC",
+        "https://ssc.gov.in/",
+    ),
+]
+
+for label, url in exam_links:
+    st.link_button(
+        label,
+        url,
+        use_container_width=True,
+    )
+```
+
+# ============================================================
+
 # MUSIC LIBRARY
+
 # ============================================================
 
 AUDIO_EXTENSIONS = {
-    ".mp3",
-    ".wav",
-    ".m4a",
-    ".aac",
-    ".ogg",
-    ".flac",
-    ".opus",
+".mp3",
+".wav",
+".m4a",
+".aac",
+".ogg",
+".flac",
+".opus",
 }
 
+def get_songs():
+songs = []
 
-def library_songs() -> list[Path]:
+```
+if not MUSIC_DIR.exists():
+    return songs
 
-    songs = []
+for path in MUSIC_DIR.iterdir():
 
-    for path in MUSIC_DIR.iterdir():
+    if (
+        path.is_file()
+        and path.suffix.lower()
+        in AUDIO_EXTENSIONS
+    ):
+        songs.append(path)
 
-        if not path.is_file():
-            continue
+return sorted(
+    songs,
+    key=lambda x: x.name.lower(),
+)
+```
 
-        if path.suffix.lower() in AUDIO_EXTENSIONS:
-            songs.append(path)
+def valid_library_file(path):
+try:
+return (
+path.resolve().parent
+== MUSIC_DIR.resolve()
+and path.is_file()
+)
+except Exception:
+return False
 
-    return sorted(
-        songs,
-        key=lambda p: p.name.lower(),
+def delete_song(path):
+
+```
+if not valid_library_file(path):
+    return False, "Invalid library file."
+
+try:
+    path.unlink()
+    return True, f"Deleted {path.name}"
+except Exception as exc:
+    return False, str(exc)
+```
+
+def admin_login():
+
+```
+if st.session_state.admin_authenticated:
+    return True
+
+if not ADMIN_PASSWORD:
+    st.info(
+        "Admin controls are disabled because "
+        "ADMIN_PASSWORD is not configured in Streamlit Secrets."
+    )
+    return False
+
+password = st.text_input(
+    "Admin password",
+    type="password",
+    key="admin_password",
+)
+
+if st.button(
+    "🔐 Admin Login",
+    use_container_width=True,
+):
+
+    if password == ADMIN_PASSWORD:
+        st.session_state.admin_authenticated = True
+        st.success("Admin access enabled.")
+        st.rerun()
+    else:
+        st.error("Incorrect admin password.")
+
+return False
+```
+
+def page_music():
+
+```
+page_title(
+    "🎵 RacharlaGPT Music",
+    "Public listening library.",
+)
+
+st.markdown(
+    """
+    <div class="notice">
+    🎧 Users can listen to published songs.
+    Upload and delete controls are available only to the
+    authenticated administrator.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+songs = get_songs()
+
+if not songs:
+
+    st.info(
+        "No songs have been published yet."
     )
 
-
-def safe_library_path(path: Path) -> bool:
-
-    try:
-        resolved = path.resolve()
-        library_root = MUSIC_DIR.resolve()
-
-        return (
-            resolved.parent == library_root
-            and resolved.is_file()
-        )
-
-    except Exception:
-        return False
-
-
-def delete_library_song(path: Path) -> tuple[bool, str]:
-
-    if not safe_library_path(path):
-        return False, "Invalid library file."
-
-    try:
-        path.unlink()
-        return True, f"Deleted {path.name}"
-
-    except Exception as exc:
-        return False, f"Could not delete song: {exc}"
-
-
-def render_public_music_library():
-
-    songs = library_songs()
-
-    if not songs:
-        st.info(
-            "No songs have been published to the "
-            "RacharlaGPT Library yet."
-        )
-        return
+else:
 
     for song in songs:
 
@@ -1009,1300 +1705,715 @@ def render_public_music_library():
         )
 
         try:
-            with open(song, "rb") as audio_file:
+
+            with open(
+                song,
+                "rb",
+            ) as audio:
+
                 st.audio(
-                    audio_file.read(),
+                    audio.read(),
                     format=song.suffix.lower(),
                 )
+
         except Exception as exc:
             st.error(
                 f"Unable to play {song.name}: {exc}"
             )
 
+st.divider()
 
-def render_admin_music_library():
+st.markdown("### 🔐 Administrator")
 
-    st.markdown("### 🛠️ Admin Music Management")
+if not admin_login():
+    return
 
-    songs = library_songs()
+uploaded = st.file_uploader(
+    "Publish song",
+    type=[
+        "mp3",
+        "wav",
+        "m4a",
+        "aac",
+        "ogg",
+        "flac",
+        "opus",
+    ],
+    key="music_upload",
+)
 
-    if not songs:
-        st.info("Library is empty.")
-        return
-
-    for index, song in enumerate(songs):
-
-        col1, col2 = st.columns(
-            [4, 1],
-            vertical_alignment="center",
-        )
-
-        with col1:
-            st.write(f"🎵 **{song.name}**")
-
-        with col2:
-
-            if st.button(
-                "🗑️ Delete",
-                key=f"delete_song_{index}_{song.name}",
-                use_container_width=True,
-            ):
-
-                ok, message = delete_library_song(song)
-
-                if ok:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
-
-
-# ============================================================
-# VIDEO / AUDIO
-# ============================================================
-
-def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
-
-
-def extract_audio_from_video(
-    video_path: Path,
-    output_path: Path,
-) -> tuple[bool, str]:
-
-    if not ffmpeg_available():
-        return (
-            False,
-            "FFmpeg is not installed on this server. "
-            "Video-to-audio extraction is unavailable.",
-        )
-
-    try:
-
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(video_path),
-            "-vn",
-            "-acodec",
-            "mp3",
-            str(output_path),
-        ]
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-
-        if result.returncode != 0:
-            return (
-                False,
-                result.stderr[-1500:],
-            )
-
-        return True, str(output_path)
-
-    except subprocess.TimeoutExpired:
-        return (
-            False,
-            "FFmpeg timed out while processing the video.",
-        )
-
-    except Exception as exc:
-        return False, str(exc)
-
-
-# ============================================================
-# HOME
-# ============================================================
-
-HOME_CARDS = [
-    (
-        "🧠",
-        "Solve Anything",
-        "Ask questions and get AI-powered explanations.",
-        "card-pink",
-        "Solve Anything",
-    ),
-    (
-        "🔬",
-        "AI Science Solver",
-        "Physics, Mathematics, Chemistry and Science.",
-        "card-blue",
-        "AI Science Solver",
-    ),
-    (
-        "🎓",
-        "Student Hub",
-        "Study help, notes, concepts and preparation.",
-        "card-purple",
-        "Student Hub",
-    ),
-    (
-        "🌐",
-        "Live Information",
-        "Ask for current information and research topics.",
-        "card-green",
-        "Live Information",
-    ),
-    (
-        "💼",
-        "Job Notifications",
-        "Explore government, banking, railway and other jobs.",
-        "card-orange",
-        "Job Notifications",
-    ),
-    (
-        "📝",
-        "Exam Notifications",
-        "Exam categories, preparation and official links.",
-        "card-teal",
-        "Exam Notifications",
-    ),
-    (
-        "🎵",
-        "RacharlaGPT Music",
-        "Listen to songs published in the public library.",
-        "card-red",
-        "RacharlaGPT Music",
-    ),
-    (
-        "🎬",
-        "Video Studio",
-        "Create simple image/text/video projects.",
-        "card-indigo",
-        "RacharlaGPT Video Studio",
-    ),
-    (
-        "✍️",
-        "Creator Studio",
-        "Create scripts, captions and content.",
-        "card-pink",
-        "Creator Studio",
-    ),
-    (
-        "🌍",
-        "Translator",
-        "Translate text between languages.",
-        "card-blue",
-        "Translator",
-    ),
-]
-
-
-def page_home():
-
-    show_page_title(
-        "🇮🇳 NavaBharat AI",
-        "A multilingual AI workspace powered by RacharlaGPT.",
-    )
-
-    st.markdown(
-        """
-        <div class="security-notice">
-        🔒 <strong>Privacy note:</strong>
-        NavaBharat AI does not require an application database
-        for these features. Sharing uses the user's browser/app.
-        AI requests may still be processed by the configured AI
-        provider when you use AI features.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    cols = st.columns(2)
-
-    for index, (
-        icon,
-        title,
-        description,
-        css_class,
-        target,
-    ) in enumerate(HOME_CARDS):
-
-        with cols[index % 2]:
-
-            st.markdown(
-                f"""
-                <div class="home-card {css_class}">
-                    <div style="font-size:42px">{icon}</div>
-                    <h3>{html.escape(title)}</h3>
-                    <p>{html.escape(description)}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            # Different gradient button classes are supplied by
-            # Streamlit's CSS/button order and card colors.
-
-            if st.button(
-                f"Open {icon} {title}",
-                key=f"home_card_{index}",
-                use_container_width=True,
-            ):
-                go_page(target)
-
-
-# ============================================================
-# SOLVE ANYTHING
-# ============================================================
-
-def page_solve():
-
-    show_page_title(
-        "🧠 Solve Anything",
-        "Ask questions across education, writing, science and general topics.",
-    )
-
-    question = st.text_area(
-        "Your question",
-        placeholder=(
-            "Ask anything...\n\n"
-            "Example: Explain quantum physics in simple language."
-        ),
-        height=180,
-        key="solve_question",
-    )
+if uploaded is not None:
 
     if st.button(
-        "🚀 Solve My Question",
-        key="solve_button",
+        "🎵 Publish Song",
         use_container_width=True,
     ):
 
-        if not question.strip():
-            st.warning("Please enter a question.")
-            return
+        filename = Path(
+            uploaded.name
+        ).name
 
-        with st.spinner("Thinking..."):
-
-            ok, answer = ask_gemini(
-                f"""
-You are NavaBharat AI.
-
-Answer the following user question clearly and accurately.
-
-Question:
-{question}
-
-Use headings, bullets, equations and examples when useful.
-Do not invent current facts.
-"""
-            )
-
-        if ok:
-            st.session_state.last_answer = answer
-            render_ai_result(
-                "AI Answer",
-                answer,
-                "solve",
-            )
-        else:
-            st.error(answer)
-
-
-# ============================================================
-# SCIENCE
-# ============================================================
-
-def page_science():
-
-    show_page_title(
-        "🔬 AI Science Solver",
-        "Physics • Mathematics • Chemistry • Biology • General Science",
-    )
-
-    subject = st.selectbox(
-        "Choose subject",
-        [
-            "Physics",
-            "Mathematics",
-            "Chemistry",
-            "Biology",
-            "General Science",
-        ],
-    )
-
-    question = st.text_area(
-        "Problem / Question",
-        placeholder=(
-            "Enter your question or problem here..."
-        ),
-        height=180,
-        key="science_question",
-    )
-
-    if st.button(
-        f"🧪 Solve {subject}",
-        key="science_solve",
-        use_container_width=True,
-    ):
-
-        if not question.strip():
-            st.warning("Enter a problem first.")
-            return
-
-        with st.spinner("Solving..."):
-
-            ok, answer = ask_gemini(
-                f"""
-You are an expert {subject} tutor.
-
-Solve this problem:
-
-{question}
-
-Give:
-1. Concept
-2. Given information
-3. Formula if applicable
-4. Step-by-step solution
-5. Final answer
-6. Short explanation
-
-For numerical questions, show calculations clearly.
-"""
-            )
-
-        if ok:
-            render_ai_result(
-                f"{subject} Answer",
-                answer,
-                f"science_{subject.lower()}",
-            )
-        else:
-            st.error(answer)
-
-
-# ============================================================
-# STUDENT HUB
-# ============================================================
-
-def page_student():
-
-    show_page_title(
-        "🎓 Student Hub",
-        "Study support, notes, revision and preparation.",
-    )
-
-    topic = st.text_input(
-        "Topic",
-        placeholder="Example: Newton's Laws",
-        key="student_topic",
-    )
-
-    mode = st.selectbox(
-        "What do you need?",
-        [
-            "Simple Explanation",
-            "Revision Notes",
-            "Important Questions",
-            "Quiz",
-            "Study Plan",
-        ],
-    )
-
-    if st.button(
-        "🎓 Generate",
-        key="student_generate",
-        use_container_width=True,
-    ):
-
-        if not topic.strip():
-            st.warning("Enter a topic.")
-            return
-
-        ok, answer = ask_gemini(
-            f"""
-Create student learning material.
-
-Topic: {topic}
-Requested format: {mode}
-
-Make it clear and useful for students.
-"""
+        filename = re.sub(
+            r"[^A-Za-z0-9._ -]",
+            "_",
+            filename,
         )
 
-        if ok:
-            render_ai_result(
-                f"Student Hub — {mode}",
-                answer,
-                "student",
-            )
-        else:
-            st.error(answer)
-
-
-# ============================================================
-# LIVE INFORMATION
-# ============================================================
-
-def page_live():
-
-    show_page_title(
-        "🌐 Live Information",
-        "Use this area for current-information questions.",
-    )
-
-    st.markdown(
-        """
-        <div class="glass-card">
-        <h3>🔎 Current Information</h3>
-        <p>
-        Ask a question that needs up-to-date information.
-        </p>
-        <p>
-        Examples: current technology news, current government
-        information, latest announcements, recent events, etc.
-        </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    query = st.text_area(
-        "Current-information question",
-        placeholder=(
-            "Example: What are the latest official announcements "
-            "for students?"
-        ),
-        height=160,
-        key="live_query",
-    )
-
-    if st.button(
-        "🌐 Ask About Current Information",
-        key="live_button",
-        use_container_width=True,
-    ):
-
-        if not query.strip():
-            st.warning("Enter a question.")
-            return
-
-        ok, answer = ask_gemini(
-            f"""
-The user wants information that may be current.
-
-Question:
-{query}
-
-Be explicit when you cannot verify current information.
-Do not fabricate dates, announcements, jobs, exam notices,
-prices or live events.
-
-If current sources are unavailable, clearly say that the user
-should verify with the relevant official source.
-"""
+        destination = (
+            MUSIC_DIR / filename
         )
 
-        if ok:
-            render_ai_result(
-                "Live Information",
-                answer,
-                "live",
-            )
-        else:
-            st.error(answer)
+        try:
 
+            with open(
+                destination,
+                "wb",
+            ) as output:
 
-# ============================================================
-# JOBS
-# ============================================================
-
-JOB_CATEGORIES = [
-    "Central Government",
-    "State Government",
-    "Telangana Government",
-    "Andhra Pradesh Government",
-    "Banking",
-    "Railways",
-    "SSC",
-    "UPSC",
-    "Defence",
-    "Teaching",
-    "Police",
-    "Private Jobs",
-    "IT Jobs",
-    "Other Jobs",
-]
-
-
-def page_jobs():
-
-    show_page_title(
-        "💼 Job Notifications",
-        "Job categories and AI assistance for finding relevant information.",
-    )
-
-    category = st.selectbox(
-        "Job category",
-        JOB_CATEGORIES,
-    )
-
-    query = st.text_area(
-        "What job information do you need?",
-        placeholder=(
-            "Example: Explain what qualifications are commonly "
-            "required for SSC jobs."
-        ),
-        height=150,
-        key="job_query",
-    )
-
-    if st.button(
-        "💼 Generate Job Information",
-        key="job_button",
-        use_container_width=True,
-    ):
-
-        if not query.strip():
-            st.warning("Enter a question.")
-            return
-
-        ok, answer = ask_gemini(
-            f"""
-Job information category:
-{category}
-
-User question:
-{query}
-
-Do not invent a currently open vacancy.
-Clearly distinguish general information from current vacancies.
-Tell the user to verify current vacancies on the official
-recruitment website.
-"""
-        )
-
-        if ok:
-            render_ai_result(
-                f"Job Information — {category}",
-                answer,
-                "jobs",
-            )
-        else:
-            st.error(answer)
-
-    st.markdown("### 🔗 Useful official-source categories")
-
-    links = {
-        "🇮🇳 UPSC": "https://upsc.gov.in/",
-        "🧾 SSC": "https://ssc.gov.in/",
-        "🚆 Indian Railways": "https://www.rrbapply.gov.in/",
-        "🏦 IBPS": "https://www.ibps.in/",
-    }
-
-    for label, url in links.items():
-        st.link_button(
-            label,
-            url,
-            use_container_width=True,
-        )
-
-
-# ============================================================
-# EXAMS
-# ============================================================
-
-EXAM_CATEGORIES = [
-    "NEET",
-    "JEE Main",
-    "JEE Advanced",
-    "TS EAPCET",
-    "AP EAPCET",
-    "CUET",
-    "SSC Exams",
-    "UPSC Exams",
-    "GATE",
-    "CAT",
-    "State Exams",
-    "University Exams",
-    "Other Exams",
-]
-
-
-def page_exams():
-
-    show_page_title(
-        "📝 Exam Notifications",
-        "Exam categories, preparation and official-source guidance.",
-    )
-
-    category = st.selectbox(
-        "Exam",
-        EXAM_CATEGORIES,
-    )
-
-    query = st.text_area(
-        "Exam question",
-        placeholder=(
-            "Example: Explain the preparation strategy for this exam."
-        ),
-        height=150,
-        key="exam_query",
-    )
-
-    if st.button(
-        "📝 Generate Exam Information",
-        key="exam_button",
-        use_container_width=True,
-    ):
-
-        if not query.strip():
-            st.warning("Enter a question.")
-            return
-
-        ok, answer = ask_gemini(
-            f"""
-Exam:
-{category}
-
-User request:
-{query}
-
-Do not invent exam dates or notifications.
-For current dates, advise checking the official examination
-authority.
-"""
-        )
-
-        if ok:
-            render_ai_result(
-                f"Exam Information — {category}",
-                answer,
-                "exams",
-            )
-        else:
-            st.error(answer)
-
-    st.markdown("### 🔗 Official examination sources")
-
-    exam_links = {
-        "🎯 NTA": "https://www.nta.ac.in/",
-        "🏛️ UPSC": "https://upsc.gov.in/",
-        "📚 SSC": "https://ssc.gov.in/",
-        "🎓 GATE": "https://gate2026.iitg.ac.in/",
-    }
-
-    for label, url in exam_links.items():
-        st.link_button(
-            label,
-            url,
-            use_container_width=True,
-        )
-
-
-# ============================================================
-# MUSIC
-# ============================================================
-
-def page_music():
-
-    show_page_title(
-        "🎵 RacharlaGPT Music",
-        "Public listening library published by the administrator.",
-    )
-
-    st.markdown(
-        """
-        <div class="security-notice">
-        🎧 Public users can listen to published songs.
-        Public users do not get upload or delete controls.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    render_public_music_library()
-
-    st.divider()
-
-    st.markdown("### 🔐 Administrator")
-
-    if render_admin_login():
-
-        uploaded = st.file_uploader(
-            "Publish a song",
-            type=[
-                "mp3",
-                "wav",
-                "m4a",
-                "aac",
-                "ogg",
-                "flac",
-                "opus",
-            ],
-            key="admin_music_upload",
-        )
-
-        if uploaded is not None:
-
-            if st.button(
-                "🎵 Publish Song",
-                key="publish_song",
-                use_container_width=True,
-            ):
-
-                filename = Path(uploaded.name).name
-
-                # Remove unsafe characters.
-                filename = re.sub(
-                    r"[^A-Za-z0-9._ -]",
-                    "_",
-                    filename,
+                output.write(
+                    uploaded.getbuffer()
                 )
 
-                destination = MUSIC_DIR / filename
-
-                try:
-
-                    with open(destination, "wb") as file:
-                        file.write(uploaded.getbuffer())
-
-                    st.success(
-                        f"Published: {filename}"
-                    )
-
-                    st.rerun()
-
-                except Exception as exc:
-                    st.error(
-                        f"Could not publish song: {exc}"
-                    )
-
-        render_admin_music_library()
-
-
-# ============================================================
-# VIDEO STUDIO
-# ============================================================
-
-def page_video():
-
-    show_page_title(
-        "🎬 RacharlaGPT Video Studio",
-        "Simple media tools for your own content.",
-    )
-
-    st.markdown(
-        """
-        <div class="glass-card">
-        <h3>🎞️ Video → Audio</h3>
-        <p>
-        Upload a video you own or have permission to process.
-        </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    uploaded_video = st.file_uploader(
-        "Upload video",
-        type=[
-            "mp4",
-            "mov",
-            "mkv",
-            "webm",
-            "avi",
-        ],
-        key="video_upload",
-    )
-
-    if uploaded_video is not None:
-
-        if not ffmpeg_available():
-            st.warning(
-                "FFmpeg is not available on this server. "
-                "Video-to-audio extraction cannot run until "
-                "FFmpeg is installed."
+            st.success(
+                f"Published: {filename}"
             )
 
+            st.rerun()
+
+        except Exception as exc:
+            st.error(
+                f"Could not publish song: {exc}"
+            )
+
+st.markdown(
+    "### 🗑️ Delete songs"
+)
+
+songs = get_songs()
+
+if not songs:
+    st.info("No songs available.")
+    return
+
+for index, song in enumerate(songs):
+
+    col1, col2 = st.columns(
+        [5, 1]
+    )
+
+    with col1:
+        st.write(
+            f"🎵 **{song.name}**"
+        )
+
+    with col2:
+
         if st.button(
-            "🎧 Extract Audio",
-            key="extract_audio",
+            "🗑️ Delete",
+            key=f"delete_{index}_{song.name}",
             use_container_width=True,
         ):
 
-            if not ffmpeg_available():
-                st.error(
-                    "FFmpeg is unavailable. "
-                    "No fake conversion will be reported."
-                )
-                return
-
-            suffix = Path(uploaded_video.name).suffix
-
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=suffix,
-                dir=UPLOAD_DIR,
-            ) as temp_video:
-
-                temp_video.write(
-                    uploaded_video.getbuffer()
-                )
-                temp_video_path = Path(
-                    temp_video.name
-                )
-
-            output_name = (
-                Path(uploaded_video.name).stem
-                + "_audio.mp3"
-            )
-
-            output_path = OUTPUT_DIR / output_name
-
-            ok, message = extract_audio_from_video(
-                temp_video_path,
-                output_path,
-            )
-
-            try:
-                temp_video_path.unlink(
-                    missing_ok=True
-                )
-            except Exception:
-                pass
+            ok, message = delete_song(song)
 
             if ok:
-
-                st.success(
-                    "Audio extraction completed."
-                )
-
-                with open(
-                    output_path,
-                    "rb",
-                ) as audio:
-
-                    st.audio(
-                        audio.read(),
-                        format="audio/mp3",
-                    )
-
-                st.download_button(
-                    "⬇️ Download Audio",
-                    data=output_path.read_bytes(),
-                    file_name=output_path.name,
-                    mime="audio/mpeg",
-                    use_container_width=True,
-                )
-
+                st.success(message)
+                st.rerun()
             else:
                 st.error(message)
-
+```
 
 # ============================================================
+
+# VIDEO STUDIO
+
+# ============================================================
+
+def ffmpeg_available():
+return shutil.which("ffmpeg") is not None
+
+def extract_audio(video_path, output_path):
+
+```
+if not ffmpeg_available():
+    return (
+        False,
+        "FFmpeg is unavailable on this server.",
+    )
+
+command = [
+    "ffmpeg",
+    "-y",
+    "-i",
+    str(video_path),
+    "-vn",
+    "-codec:a",
+    "libmp3lame",
+    "-q:a",
+    "2",
+    str(output_path),
+]
+
+try:
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+    if result.returncode != 0:
+        return (
+            False,
+            result.stderr[-2000:],
+        )
+
+    return True, "Audio extracted successfully."
+
+except subprocess.TimeoutExpired:
+    return (
+        False,
+        "FFmpeg timed out.",
+    )
+
+except Exception as exc:
+    return False, str(exc)
+```
+
+def page_video():
+
+```
+page_title(
+    "🎬 RacharlaGPT Video Studio",
+    "Video and audio utilities.",
+)
+
+st.markdown(
+    """
+    <div class="glass-card">
+    <h3>🎧 Video to Audio</h3>
+    <p>
+    Upload content that you own or have permission to process.
+    </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+uploaded = st.file_uploader(
+    "Video file",
+    type=[
+        "mp4",
+        "mov",
+        "mkv",
+        "webm",
+        "avi",
+    ],
+)
+
+if uploaded is None:
+    return
+
+if not ffmpeg_available():
+
+    st.warning(
+        "FFmpeg is not installed on this server. "
+        "Video-to-audio extraction cannot currently run."
+    )
+
+    return
+
+if st.button(
+    "🎧 Extract Audio",
+    use_container_width=True,
+):
+
+    suffix = Path(
+        uploaded.name
+    ).suffix
+
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=suffix,
+        dir=UPLOAD_DIR,
+    ) as temp:
+
+        temp.write(
+            uploaded.getbuffer()
+        )
+
+        temp_path = Path(
+            temp.name
+        )
+
+    output_path = (
+        OUTPUT_DIR
+        / (
+            Path(uploaded.name).stem
+            + "_audio.mp3"
+        )
+    )
+
+    ok, message = extract_audio(
+        temp_path,
+        output_path,
+    )
+
+    try:
+        temp_path.unlink(
+            missing_ok=True
+        )
+    except Exception:
+        pass
+
+    if ok:
+
+        st.success(message)
+
+        audio_data = (
+            output_path.read_bytes()
+        )
+
+        st.audio(
+            audio_data,
+            format="audio/mp3",
+        )
+
+        st.download_button(
+            "⬇️ Download Audio",
+            data=audio_data,
+            file_name=output_path.name,
+            mime="audio/mpeg",
+            use_container_width=True,
+        )
+
+    else:
+        st.error(message)
+```
+
+# ============================================================
+
 # CREATOR STUDIO
+
 # ============================================================
 
 def page_creator():
 
-    show_page_title(
-        "✍️ Creator Studio",
-        "Generate scripts, captions, posts and creative ideas.",
-    )
+```
+page_title(
+    "✍️ Creator Studio",
+    "Create scripts, captions and content.",
+)
 
-    content_type = st.selectbox(
-        "Content type",
-        [
-            "YouTube Script",
-            "Instagram Caption",
-            "Facebook Post",
-            "LinkedIn Post",
-            "Short Video Script",
-            "Blog Outline",
-            "Creative Idea",
-        ],
-    )
+content_type = st.selectbox(
+    "Content type",
+    [
+        "YouTube Script",
+        "Short Video Script",
+        "Instagram Caption",
+        "Facebook Post",
+        "LinkedIn Post",
+        "Blog Outline",
+        "Creative Idea",
+    ],
+)
 
-    topic = st.text_area(
-        "Topic",
-        placeholder="Enter your topic...",
-        height=150,
-        key="creator_topic",
-    )
+topic = st.text_area(
+    "Topic",
+    height=170,
+    placeholder="Enter your topic...",
+)
 
-    if st.button(
-        "✍️ Create Content",
-        key="creator_button",
-        use_container_width=True,
-    ):
+if st.button(
+    "✍️ Create",
+    use_container_width=True,
+):
 
-        if not topic.strip():
-            st.warning("Enter a topic.")
-            return
+    if not topic.strip():
+        st.warning("Enter a topic.")
+        return
 
-        ok, answer = ask_gemini(
-            f"""
+    ok, answer = ask_ai(
+        f"""
+```
+
 Create a {content_type}.
 
 Topic:
 {topic}
 
-Make the content original, clear and useful.
+Make it original and useful.
 """
+)
+
+```
+    if ok:
+        display_answer(
+            f"Creator Studio — {content_type}",
+            answer,
+            "creator",
         )
-
-        if ok:
-            render_ai_result(
-                f"Creator Studio — {content_type}",
-                answer,
-                "creator",
-            )
-        else:
-            st.error(answer)
-
+    else:
+        st.error(answer)
+```
 
 # ============================================================
+
 # TRANSLATOR
+
 # ============================================================
 
 def page_translator():
 
-    show_page_title(
-        "🌍 Translator",
-        "Translate text between languages.",
-    )
+```
+page_title(
+    "🌍 Translator",
+    "Translate text between languages.",
+)
 
-    languages = [
-        "English",
-        "Telugu",
-        "Hindi",
-        "Tamil",
-        "Kannada",
-        "Malayalam",
-        "Marathi",
-        "Bengali",
-        "Gujarati",
-        "Punjabi",
-        "Urdu",
-        "Odia",
-        "French",
-        "German",
-        "Spanish",
-        "Arabic",
-        "Chinese",
-        "Japanese",
-    ]
+languages = [
+    "English",
+    "Telugu",
+    "Hindi",
+    "Tamil",
+    "Kannada",
+    "Malayalam",
+    "Marathi",
+    "Bengali",
+    "Gujarati",
+    "Punjabi",
+    "Urdu",
+    "Odia",
+    "French",
+    "German",
+    "Spanish",
+    "Arabic",
+    "Chinese",
+    "Japanese",
+]
 
-    source = st.selectbox(
-        "From",
-        languages,
-        key="translator_source",
-    )
+source = st.selectbox(
+    "From",
+    languages,
+)
 
-    target = st.selectbox(
-        "To",
-        languages,
-        index=1,
-        key="translator_target",
-    )
+target = st.selectbox(
+    "To",
+    languages,
+    index=1,
+)
 
-    text_input = st.text_area(
-        "Text to translate",
-        placeholder="Paste or type text here...",
-        height=200,
-        key="translator_text",
-    )
+source_text = st.text_area(
+    "Text",
+    height=200,
+    placeholder="Paste or type text here...",
+)
 
-    if st.button(
-        "🌍 Translate",
-        key="translate_button",
-        use_container_width=True,
-    ):
+if st.button(
+    "🌍 Translate",
+    use_container_width=True,
+):
 
-        if not text_input.strip():
-            st.warning("Enter text first.")
-            return
+    if not source_text.strip():
+        st.warning("Enter text.")
+        return
 
-        ok, answer = ask_gemini(
-            f"""
-Translate the following text from {source} to {target}.
+    ok, answer = ask_ai(
+        f"""
+```
 
-Preserve the meaning and formatting as much as possible.
+Translate this text from {source} to {target}.
+
+Preserve the meaning.
 
 TEXT:
-{text_input}
+{source_text}
 """
+)
+
+```
+    if ok:
+
+        st.markdown(
+            "### ✅ Translated Text"
         )
 
-        if ok:
+        # Explicit white background and dark text.
+        st.markdown(
+            f"""
+            <div style="
+                background:#ffffff;
+                color:#111827;
+                padding:22px;
+                border-radius:18px;
+                border:1px solid #dbe3ef;
+                white-space:pre-wrap;
+                line-height:1.7;
+                font-size:17px;
+            ">
+            {html.escape(answer)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            st.markdown(
-                "### ✅ Translated Text"
-            )
+        share_buttons(
+            "NavaBharat AI Translation",
+            answer,
+            "translation",
+        )
 
-            # White/dark visible output area.
-            st.markdown(
-                f"""
-                <div style="
-                    background:#ffffff;
-                    color:#111827;
-                    padding:20px;
-                    border-radius:18px;
-                    border:1px solid #dbe3ef;
-                    white-space:pre-wrap;
-                    font-size:17px;
-                    line-height:1.6;
-                ">
-                {html.escape(answer)}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            render_share_buttons(
-                "NavaBharat AI Translation",
-                answer,
-                "translator",
-            )
-
-        else:
-            st.error(answer)
-
+    else:
+        st.error(answer)
+```
 
 # ============================================================
+
 # ABOUT
+
 # ============================================================
 
 def page_about():
 
-    # FIX:
-    # CREATOR is defined globally before this function executes.
-
-    show_page_title(
-        "ℹ️ About",
-        "Information about NavaBharat AI.",
-    )
-
-    st.markdown(
-        f"""
-        <div class="glass-card">
-
-        <h2>🇮🇳 {html.escape(APP_NAME)}</h2>
-
-        <p>
-        <strong>Version:</strong>
-        {html.escape(APP_VERSION)}
-        </p>
-
-        <p>
-        <strong>Creator & Developer:</strong>
-        {html.escape(CREATOR)}
-        </p>
-
-        <p>
-        <strong>Brand:</strong>
-        {html.escape(BRAND)}
-        </p>
-
-        <p>
-        <strong>Powered by:</strong>
-        {html.escape(TAGLINE)}
-        </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="security-notice">
-        🔒 <strong>Data & sharing information</strong><br><br>
-
-        NavaBharat AI does not need an application database for
-        browser-based sharing. Generated information can be shared
-        through the available sharing buttons without creating a
-        permanent application record.
-
-        <br><br>
-
-        AI requests may be processed by the configured AI provider.
-        Therefore, do not describe the service as guaranteeing
-        that no data ever leaves the server/provider.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.link_button(
-        "▶️ RacharlaGPT YouTube",
-        "https://www.youtube.com/@racharlgpt",
-        use_container_width=True,
-    )
-
-    st.markdown(
-        """
-        ### ✨ Main capabilities
-
-        - 🧠 AI question solving
-        - 🔬 Physics / Mathematics / Chemistry / Science
-        - 🎓 Student assistance
-        - 🌐 Current-information questions
-        - 💼 Job information
-        - 📝 Exam information
-        - 🎵 RacharlaGPT Music
-        - 🎬 Video Studio
-        - ✍️ Creator Studio
-        - 🌍 Translator
-        - 📤 Social sharing
-        """
-    )
-
-
-# ============================================================
-# NAVIGATION
-# ============================================================
-
-NAV_ITEMS = [
-    ("🏠", "Home"),
-    ("🧠", "Solve Anything"),
-    ("🔬", "AI Science Solver"),
-    ("🎓", "Student Hub"),
-    ("🌐", "Live Information"),
-    ("💼", "Job Notifications"),
-    ("📝", "Exam Notifications"),
-    ("🎵", "RacharlaGPT Music"),
-    ("🎬", "RacharlaGPT Video Studio"),
-    ("✍️", "Creator Studio"),
-    ("🌍", "Translator"),
-    ("ℹ️", "About"),
-]
-
-
-# ============================================================
-# PAGE FUNCTION MAP
-# ============================================================
-
-NAVIGATION = {
-    "Home": page_home,
-    "Solve Anything": page_solve,
-    "AI Science Solver": page_science,
-    "Student Hub": page_student,
-    "Live Information": page_live,
-    "Job Notifications": page_jobs,
-    "Exam Notifications": page_exams,
-    "RacharlaGPT Music": page_music,
-    "RacharlaGPT Video Studio": page_video,
-    "Creator Studio": page_creator,
-    "Translator": page_translator,
-    "About": page_about,
-}
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.markdown(
-        """
-        <div style="
-            text-align:center;
-            padding:8px 5px 18px 5px;
-        ">
-            <div style="
-                font-size:42px;
-                line-height:1;
-            ">🇮🇳</div>
-
-            <div style="
-                font-size:20px;
-                font-weight:900;
-                margin-top:8px;
-            ">
-                NavaBharat AI
-            </div>
-
-            <div style="
-                font-size:11px;
-                font-weight:800;
-                letter-spacing:.08em;
-                color:#64748b;
-                margin-top:5px;
-            ">
-                POWERED BY RACHARLAGPT
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.divider()
-
-    for icon, label in NAV_ITEMS:
-
-        if st.button(
-            f"{icon}  {label}",
-            key=f"navigation_{label}",
-            use_container_width=True,
-        ):
-
-            # Opens selected page and automatically closes
-            # navigation according to requested behavior.
-            go_page(label)
-
-    st.divider()
-
-    if st.session_state.admin_authenticated:
-
-        if st.button(
-            "🔒 Lock Admin",
-            key="lock_admin",
-            use_container_width=True,
-        ):
-            st.session_state.admin_authenticated = False
-            st.rerun()
-
-
-# ============================================================
-# FINAL PAGE DISPATCH
-# ============================================================
-
-# Defensive fix:
-# If a stale/invalid session value somehow exists,
-# never crash with NAVIGATION[...] KeyError.
-
-if st.session_state.nav_page not in NAVIGATION:
-    st.session_state.nav_page = "Home"
-
-current_page = NAVIGATION.get(
-    st.session_state.nav_page,
-    page_home,
+```
+page_title(
+    "ℹ️ About NavaBharat AI",
+    "Application information.",
 )
 
-# Execute exactly one page.
-current_page()
-
-
-# ============================================================
-# FOOTER
-# ============================================================
+# CREATOR IS DEFINED AT THE TOP OF THIS FILE.
+# This fixes the original:
+#
+# NameError: name 'CREATOR' is not defined
 
 st.markdown(
     f"""
-    <div style="
-        text-align:center;
-        padding:35px 10px 20px;
-        color:#64748b;
-        font-size:13px;
-    ">
-        <strong>{html.escape(APP_NAME)}</strong>
-        · v{html.escape(APP_VERSION)}
-        · {html.escape(TAGLINE)}
-        <br>
-        Created & Developed by
-        <strong>{html.escape(CREATOR)}</strong>
+    <div class="glass-card">
+
+    <h2>🇮🇳 {html.escape(APP_NAME)}</h2>
+
+    <p>
+    <strong>Version:</strong>
+    {html.escape(APP_VERSION)}
+    </p>
+
+    <p>
+    <strong>Creator & Developer:</strong>
+    {html.escape(CREATOR)}
+    </p>
+
+    <p>
+    <strong>Brand:</strong>
+    {html.escape(BRAND)}
+    </p>
+
+    <p>
+    <strong>Powered by:</strong>
+    {html.escape(TAGLINE)}
+    </p>
+
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown(
+    """
+    <div class="notice">
+
+    🔒 <strong>Data & sharing</strong>
+
+    <br><br>
+
+    The application does not require an application database
+    for its browser-based sharing buttons.
+
+    <br><br>
+
+    Sharing opens the selected service in the user's browser
+    or app. The application does not need to permanently save
+    the generated answer simply to create a share link.
+
+    <br><br>
+
+    AI requests may be processed by the configured AI provider.
+    Users should avoid submitting sensitive personal information.
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.link_button(
+    "▶️ RacharlaGPT YouTube",
+    "https://www.youtube.com/@racharlgpt",
+    use_container_width=True,
+)
+```
+
+# ============================================================
+
+# NAVIGATION
+
+# ============================================================
+
+NAV_ITEMS = [
+("🏠", "Home"),
+("🧠", "Solve Anything"),
+("🔬", "AI Science Solver"),
+("🎓", "Student Hub"),
+("🌐", "Live Information"),
+("💼", "Job Notifications"),
+("📝", "Exam Notifications"),
+("🎵", "RacharlaGPT Music"),
+("🎬", "RacharlaGPT Video Studio"),
+("✍️", "Creator Studio"),
+("🌍", "Translator"),
+("ℹ️", "About"),
+]
+
+NAVIGATION = {
+"Home": page_home,
+"Solve Anything": page_solve,
+"AI Science Solver": page_science,
+"Student Hub": page_student,
+"Live Information": page_live,
+"Job Notifications": page_jobs,
+"Exam Notifications": page_exams,
+"RacharlaGPT Music": page_music,
+"RacharlaGPT Video Studio": page_video,
+"Creator Studio": page_creator,
+"Translator": page_translator,
+"About": page_about,
+}
+
+# ============================================================
+
+# SIDEBAR
+
+# ============================================================
+
+with st.sidebar:
+
+```
+st.markdown(
+    """
+    <div style="
+        text-align:center;
+        padding:10px 5px 18px;
+    ">
+
+        <div style="
+            font-size:43px;
+        ">🇮🇳</div>
+
+        <div style="
+            font-size:21px;
+            font-weight:950;
+            margin-top:7px;
+        ">
+            NavaBharat AI
+        </div>
+
+        <div style="
+            font-size:10px;
+            font-weight:900;
+            letter-spacing:.08em;
+            color:#64748b;
+            margin-top:5px;
+        ">
+            POWERED BY RACHARLAGPT
+        </div>
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.divider()
+
+for icon, label in NAV_ITEMS:
+
+    if st.button(
+        f"{icon}  {label}",
+        key=f"nav_{label}",
+        use_container_width=True,
+    ):
+        navigate(label)
+
+st.divider()
+
+if st.session_state.admin_authenticated:
+
+    if st.button(
+        "🔒 Lock Admin",
+        key="lock_admin",
+        use_container_width=True,
+    ):
+
+        st.session_state.admin_authenticated = False
+        st.rerun()
+```
+
+# ============================================================
+
+# SAFE PAGE DISPATCH
+
+# ============================================================
+
+# This prevents:
+
+#
+
+# NAVIGATION[st.session_state.nav_page]()
+
+#
+
+# from crashing if an invalid/stale page exists.
+
+if st.session_state.nav_page not in NAVIGATION:
+st.session_state.nav_page = "Home"
+
+page_function = NAVIGATION.get(
+st.session_state.nav_page,
+page_home,
+)
+
+page_function()
+
+# ============================================================
+
+# FOOTER
+
+# ============================================================
+
+st.markdown(
+f""" <div style="
+     text-align:center;
+     padding:35px 10px 20px;
+     color:#64748b;
+     font-size:13px;
+ ">
+
+```
+    <strong>{html.escape(APP_NAME)}</strong>
+    · v{html.escape(APP_VERSION)}
+    · {html.escape(TAGLINE)}
+
+    <br>
+
+    Created & Developed by
+    <strong>{html.escape(CREATOR)}</strong>
+
+</div>
+""",
+unsafe_allow_html=True,
+```
+
+)
+
+```
+
+**Important:** this is a clean replacement, so it will not contain the `SyntaxError` from my previous answer. But if your goal is specifically **“keep every existing feature of my original 6.0.0 and only repair it”**, I need the actual existing `app.py`; otherwise there is no way to reconstruct code that isn't present in the conversation.
 ```
