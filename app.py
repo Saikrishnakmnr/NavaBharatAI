@@ -44,6 +44,29 @@ st.set_page_config(
 
 
 # ============================================================
+# GOOGLE ANALYTICS & MONETAG AD INJECTION
+# ============================================================
+
+st.markdown(
+    """
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-39MNX1V7XK"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-39MNX1V7XK');
+    </script>
+
+    <!-- Monetag Script (Zone ID: 11941649) -->
+    <script src="https://3nbf4.com/act/files/tag.min.js?z=11941649" data-cfasync="false" async></script>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
 # PREMIUM UI
 # ============================================================
 
