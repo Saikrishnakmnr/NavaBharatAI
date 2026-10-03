@@ -1246,16 +1246,38 @@ def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image
                     "image_size": image_size,
                 },
             }
-            response = requests.post(
+            # Google now documents the stable v1 Interactions endpoint.
+            # Try stable first, then beta for compatibility with older projects.
+            response = None
+            raw = ""
+            endpoint_errors = []
+            for endpoint in (
+                "https://generativelanguage.googleapis.com/v1/interactions",
                 "https://generativelanguage.googleapis.com/v1beta/interactions",
-                headers=_gemini_auth_headers(api_key, bearer=False),
-                json=payload,
-                timeout=180,
-            )
-            raw = response.text[:1800]
-            if not response.ok:
-                last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}, x-goog-api-key): {raw}"
-                if response.status_code in (401, 403) and "API_KEY_SERVICE_BLOCKED" in raw.upper():
+            ):
+                try:
+                    candidate = requests.post(
+                        endpoint,
+                        headers=_gemini_auth_headers(api_key, bearer=False),
+                        json=payload,
+                        timeout=180,
+                    )
+                    response = candidate
+                    raw = candidate.text[:1800]
+                    if candidate.ok:
+                        break
+                    endpoint_errors.append(f"{endpoint.rsplit('/', 2)[-2]} HTTP {candidate.status_code}: {raw}")
+                    # If stable explicitly rejects the model/endpoint, beta may still work.
+                    # For authentication failures, still try beta once before giving up.
+                except Exception as exc:
+                    endpoint_errors.append(f"{endpoint.rsplit('/', 2)[-2]}: {clean_error(exc)}")
+                    response = None
+
+            if response is None or not response.ok:
+                detail = " | ".join(endpoint_errors)[-3000:]
+                last_error = f"Gemini image key {key_index} rejected: {detail}"
+                combined = detail.upper()
+                if "API_KEY_SERVICE_BLOCKED" in combined:
                     blocked_keys.append(str(key_index))
                 continue
 
