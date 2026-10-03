@@ -40,7 +40,8 @@ def inject_tracking_scripts():
         ga_id = _early_secret("GA_MEASUREMENT_ID", "G-39MNX1V7XK")
         monetag_id = _early_secret("MONETAG_ZONE_ID", "11941649")
         google_verification = _early_secret("GOOGLE_SITE_VERIFICATION")
-        monetag_verification = _early_secret("MONETAG_VERIFICATION_META")
+        monetag_verification_tag = _early_secret("MONETAG_VERIFICATION_TAG")
+        monetag_verification_legacy = _early_secret("MONETAG_VERIFICATION_META")
 
         streamlit_path = Path(st.__path__[0])
         index_path = streamlit_path / "static" / "index.html"
@@ -76,10 +77,14 @@ gtag('config', '{html.escape(ga_id)}', {{
                 f'<meta name="google-site-verification" content="{html.escape(google_verification, quote=True)}">'
             )
 
-        if monetag_verification and "monetag-verification" not in html_text:
-            # Store the exact meta content supplied by Monetag.
+        if monetag_verification_tag and "monetag" not in html_text.lower():
+            # IMPORTANT: Monetag requires the exact verification tag generated
+            # in its dashboard. Do not invent/modify the meta name or content.
+            head_parts.append(monetag_verification_tag)
+        elif monetag_verification_legacy and "monetag-verification" not in html_text:
+            # Backward-compatible option if the user supplied only a token.
             head_parts.append(
-                f'<meta name="monetag-verification" content="{html.escape(monetag_verification, quote=True)}">'
+                f'<meta name="monetag-verification" content="{html.escape(monetag_verification_legacy, quote=True)}">'
             )
 
         if head_parts and "<head>" in html_text:
@@ -100,7 +105,7 @@ inject_tracking_scripts()
 # ============================================================
 
 APP_NAME = "NavaBharat AI"
-APP_VERSION = "7.0.0"
+APP_VERSION = "8.0.0"
 CREATOR = "Racharla Saikrishna"
 BRAND = "RacharlaGPT"
 TAGLINE = "POWERED BY RACHARLAGPT"
@@ -611,29 +616,56 @@ def safe_secret(name: str, default: str = "") -> str:
     return default
 
 
+def gemini_keys():
+    """Return all configured Gemini keys in deterministic failover order."""
+    values = []
+    # Support both individually named keys and a comma/newline-separated pool.
+    for name in (
+        "GEMINI_API_KEY",
+        "GEMINI_API_KEY_2",
+        "GEMINI_API_KEY_3",
+        "GEMINI_AI_KEY_1",
+        "GEMINI_AI_KEY_2",
+        "GEMINI_AI_KEY_3",
+        "GOOGLE_API_KEY",
+    ):
+        value = safe_secret(name)
+        if value and value not in values:
+            values.append(value)
+    pool = safe_secret("GEMINI_API_KEYS")
+    if pool:
+        for value in re.split(r"[\s,;]+", pool):
+            value = value.strip()
+            if value and value not in values:
+                values.append(value)
+    return values
+
+
 def gemini_key():
-    return safe_secret("GEMINI_API_KEY") or safe_secret("GOOGLE_API_KEY")
+    keys = gemini_keys()
+    return keys[0] if keys else ""
 
 
 def configured_models():
     primary = safe_secret("GEMINI_MODEL", "gemini-3.8-flash")
     models = [
         primary,
+        "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-2.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
     ]
     return list(dict.fromkeys(x for x in models if x))
 
 
 # ============================================================
-# GEMINI CLIENT
+# GEMINI CLIENTS
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
-def get_gemini_client():
-    key = gemini_key()
+def get_gemini_client(api_key: str = ""):
+    key = api_key or gemini_key()
     if not key:
         return None
     try:
@@ -650,9 +682,9 @@ def clean_error(exc):
 
 
 def gemini_generate(prompt: str, grounded: bool = False, retries: int = 2):
-    client = get_gemini_client()
-    if client is None:
-        return False, "Gemini is not connected. Add GEMINI_API_KEY to Streamlit Secrets."
+    keys = gemini_keys()
+    if not keys:
+        return False, "Gemini is not connected. Add GEMINI_API_KEY (and optionally GEMINI_API_KEY_2) to Streamlit Secrets."
 
     try:
         from google.genai import types
@@ -660,34 +692,39 @@ def gemini_generate(prompt: str, grounded: bool = False, retries: int = 2):
         return False, f"Gemini SDK import failed: {clean_error(exc)}"
 
     last_error = ""
-    for model in configured_models():
-        for attempt in range(retries + 1):
-            try:
-                config = None
-                if grounded:
-                    config = types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())]
+    for api_key in keys:
+        client = get_gemini_client(api_key)
+        if client is None:
+            continue
+        for model in configured_models():
+            for attempt in range(retries + 1):
+                try:
+                    config = None
+                    if grounded:
+                        config = types.GenerateContentConfig(
+                            tools=[types.Tool(google_search=types.GoogleSearch())]
+                        )
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=config,
                     )
-
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=config,
-                )
-                answer = getattr(response, "text", None)
-                if answer:
-                    return True, answer
-
-                last_error = f"{model}: empty response"
-                break
-            except Exception as exc:
-                raw = str(exc)
-                last_error = f"{model}: {clean_error(exc)}"
-                transient = any(k in raw for k in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "deadline", "timeout"])
-                if transient and attempt < retries:
-                    time.sleep(1.2 * (2 ** attempt))
-                    continue
-                break
+                    answer = getattr(response, "text", None)
+                    if answer:
+                        return True, answer
+                    last_error = f"{model}: empty response"
+                    break
+                except Exception as exc:
+                    raw = str(exc)
+                    last_error = f"{model}: {clean_error(exc)}"
+                    transient = any(k in raw for k in [
+                        "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED",
+                        "deadline", "timeout", "temporarily",
+                    ])
+                    if transient and attempt < retries:
+                        time.sleep(1.2 * (2 ** attempt))
+                        continue
+                    break
 
     return False, f"Gemini temporarily unavailable. Detail: {last_error}"
 
@@ -956,10 +993,12 @@ def social_links(text: str, url: str = CHANNEL_URL):
 
 
 def go(page: str):
-    # Keep both the application route and the radio widget state in sync.
-    # Without this, Streamlit can restore the previous radio selection on rerun.
+    # IMPORTANT: do not mutate the state of an already-created widget.
+    # Streamlit raises StreamlitWidgetAlreadyInstantiatedError when a widget
+    # key is changed after that widget has been instantiated in the same run.
+    # The sidebar radio below is intentionally keyless; it derives its value
+    # from the application route before it is created.
     st.session_state["nav"] = page
-    st.session_state["nav_radio"] = page
     st.rerun()
 
 
@@ -1020,47 +1059,86 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
+    """Generate/edit an image with Gemini's native image models.
+
+    Uses all configured Gemini keys as failover. We deliberately do NOT fall
+    back to an unrelated third-party image generator: if Gemini fails, the UI
+    reports the actual error instead of showing an unrelated image.
     """
-    Uses Gemini's native image model. Supports both text-to-image and
-    text+image editing. Returns (bytes, mime_type) or (None, None).
-    """
-    client = get_gemini_client()
-    if not client:
-        return None, None
+    keys = gemini_keys()
+    if not keys:
+        return None, None, "No Gemini API key is configured."
 
     try:
         import base64
-        model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+    except Exception as exc:
+        return None, None, clean_error(exc)
+
+    models = [
+        safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
+        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
+    ]
+    models = list(dict.fromkeys(x for x in models if x))
+    last_error = ""
+
+    for api_key in keys:
+        client = get_gemini_client(api_key)
+        if client is None:
+            continue
 
         if image_bytes:
             inputs = [
-                {"type": "text", "text": prompt},
                 {
                     "type": "image",
                     "data": base64.b64encode(image_bytes).decode("utf-8"),
-                    "mime_type": mime_type,
+                    "mime_type": mime_type or "image/png",
+                },
+                {
+                    "type": "text",
+                    "text": prompt,
                 },
             ]
         else:
             inputs = prompt
 
-        interaction = client.interactions.create(
-            model=model,
-            input=inputs,
-            response_format={
-                "type": "image",
-                "mime_type": "image/png",
-                "aspect_ratio": aspect_ratio,
-                "image_size": image_size,
-            },
-        )
-        output_image = getattr(interaction, "output_image", None)
-        if output_image and getattr(output_image, "data", None):
-            return base64.b64decode(output_image.data), getattr(output_image, "mime_type", "image/png")
-    except Exception:
-        return None, None
+        for model in models:
+            try:
+                interaction = client.interactions.create(
+                    model=model,
+                    input=inputs,
+                    response_format={
+                        "type": "image",
+                        "mime_type": "image/png",
+                        "aspect_ratio": aspect_ratio,
+                        "image_size": image_size,
+                    },
+                )
+                output_image = getattr(interaction, "output_image", None)
+                if output_image and getattr(output_image, "data", None):
+                    return (
+                        base64.b64decode(output_image.data),
+                        getattr(output_image, "mime_type", "image/png"),
+                        "",
+                    )
 
-    return None, None
+                # Newer SDK responses can expose image blocks through steps.
+                for step in getattr(interaction, "steps", []) or []:
+                    if getattr(step, "type", None) != "model_output":
+                        continue
+                    for block in getattr(step, "content", []) or []:
+                        if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                            return (
+                                base64.b64decode(block.data),
+                                getattr(block, "mime_type", "image/png"),
+                                "",
+                            )
+                last_error = f"{model}: no image returned"
+            except Exception as exc:
+                last_error = f"{model}: {clean_error(exc)}"
+                continue
+
+    return None, None, last_error or "No image was returned by Gemini."
 
 
 def sharpen_image_bytes(data: bytes) -> bytes:
@@ -1078,24 +1156,6 @@ def sharpen_image_bytes(data: bytes) -> bytes:
         return out.getvalue()
     except Exception:
         return data
-
-
-def fallback_pollinations_image(prompt: str, width: int, height: int):
-    encoded = urllib.parse.quote_plus(prompt)
-    seed = int(time.time() * 1000) % 1000000
-    url = (
-        f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&seed={seed}&nologo=true&model=flux"
-        f"&enhance=true&safe=true"
-    )
-    response = requests.get(
-        url,
-        headers={"User-Agent": "NavaBharat-AI/7.0"},
-        timeout=60,
-    )
-    if response.status_code != 200 or not response.content:
-        return None
-    return response.content
 
 
 def page_image_generator():
@@ -1135,26 +1195,30 @@ def page_image_generator():
             else:
                 aspect_ratio = {"1:1 (Square)": "1:1", "16:9 (Landscape)": "16:9", "9:16 (Portrait / Reel)": "9:16"}[aspect]
                 width, height = {"1:1 (Square)": (1024, 1024), "16:9 (Landscape)": (1536, 864), "9:16 (Portrait / Reel)": (864, 1536)}[aspect]
+                style_instruction = {
+                    "Photorealistic": "photorealistic photography",
+                    "Digital Art": "high-detail digital illustration",
+                    "Anime / Manga": "anime / manga illustration",
+                    "Cinematic": "cinematic live-action photography",
+                    "3D Render": "high-end 3D render",
+                    "Fantasy Art": "detailed fantasy concept art",
+                    "Cyberpunk": "cinematic cyberpunk concept art",
+                }[style]
                 quality_prompt = (
-                    f"{prompt.strip()}. Style: {style}. "
-                    "Very sharp focus, crisp edges, realistic fine details, clear eyes and facial features, "
-                    "natural skin texture, well-defined objects, high detail, professional lighting. "
-                    "Avoid blur, haze, smeared details, distorted hands, duplicate objects, warped faces, "
-                    "soft focus, low resolution, text artifacts."
+                    f"Create exactly this requested image: {prompt.strip()}. "
+                    f"Visual style: {style_instruction}. "
+                    "The user's requested subjects and actions are the highest priority; do not replace them with unrelated people, countries, clothing, "
+                    "K-pop/Korean styling, random portraits, or unrelated scenes. Keep every explicit object, action, location, ethnicity/nationality descriptor, "
+                    "food/object identity, and composition instruction from the user. "
+                    "Use sharp focus, crisp edges, realistic fine details, coherent anatomy, clear objects, professional lighting, and high resolution. "
+                    "Avoid blur, haze, smeared details, duplicate objects, warped faces, distorted hands, low resolution, random text, logos, and watermarks."
                 )
                 with st.spinner("Generating high-quality image..."):
-                    img_bytes, mime = generate_gemini_image(
+                    img_bytes, mime, image_error = generate_gemini_image(
                         quality_prompt,
                         aspect_ratio=aspect_ratio,
                         image_size=size,
                     )
-                    if img_bytes is None:
-                        try:
-                            img_bytes = fallback_pollinations_image(quality_prompt, width, height)
-                            mime = "image/png"
-                        except Exception as exc:
-                            st.error(f"Image generation failed: {clean_error(exc)}")
-                            img_bytes = None
 
                     if img_bytes:
                         img_bytes = sharpen_image_bytes(img_bytes)
@@ -1169,7 +1233,8 @@ def page_image_generator():
                         st.markdown("### 📤 Share Creation")
                         social_links(f"AI image created on NavaBharat AI: {prompt[:80]}", CHANNEL_URL)
                     else:
-                        st.error("No image was returned. Check GEMINI_API_KEY/GEMINI_IMAGE_MODEL and try again.")
+                        st.error(f"Image generation failed: {image_error}")
+                        st.info("No unrelated fallback image is shown. Fix the Gemini key/model and generate again.")
 
     with tab2:
         st.markdown("### 📤 Upload Your Image for AI Transformation")
@@ -1194,12 +1259,14 @@ def page_image_generator():
                     image_bytes = user_img.getvalue()
                     mime_in = user_img.type or "image/png"
                     edit_prompt = (
-                        f"Edit the supplied image according to this request: {user_mod_prompt.strip()}. "
-                        "Preserve the identity, pose, anatomy and important subject details unless the user explicitly asks to change them. "
-                        "Create a sharp, high-resolution result with crisp edges, clear facial details, natural skin texture, "
-                        "accurate hands, coherent lighting and no blur, haze, smeared features or distorted anatomy."
+                        f"Edit ONLY the supplied image according to this exact request: {user_mod_prompt.strip()}. "
+                        "Treat the uploaded image as the source of truth for the existing subject. Do not substitute a different person, country, ethnicity, "
+                        "style, or unrelated scene. Preserve identity, pose, anatomy, important objects, and composition unless the request explicitly changes them. "
+                        "If the request says to add or replace an object, make that requested object clearly visible and physically integrated into the scene. "
+                        "Create a sharp, high-resolution result with crisp edges, clear facial details, natural skin texture, accurate hands, coherent lighting, "
+                        "and no blur, haze, smeared features or distorted anatomy."
                     )
-                    transformed, out_mime = generate_gemini_image(
+                    transformed, out_mime, edit_error = generate_gemini_image(
                         edit_prompt,
                         image_bytes=image_bytes,
                         mime_type=mime_in,
@@ -1217,10 +1284,91 @@ def page_image_generator():
                             key="dl_transformed_img",
                         )
                     else:
-                        st.error(
-                            "Gemini image editing did not return an image. "
-                            "Set GEMINI_API_KEY and, if needed, GEMINI_IMAGE_MODEL=gemini-3.1-flash-image."
-                        )
+                        st.error(f"Gemini image editing failed: {edit_error}")
+
+
+def acestep_key():
+    # Support the names people commonly use for the ACE-Step cloud key.
+    return (
+        safe_secret("ACESTEP_API_KEY")
+        or safe_secret("ACE_API_KEY")
+        or safe_secret("ACE_APP_KEY")
+    )
+
+
+def generate_song_with_acestep(duration_sec: int, style: str, lyrics: str, vocal_type: str):
+    """Generate a real song with vocals/instrumentation through ACE-Step cloud API."""
+    key = acestep_key()
+    if not key:
+        return None, None, None, "ACESTEP_API_KEY/ACE_API_KEY/ACE_APP_KEY is not configured."
+
+    base_url = safe_secret("ACESTEP_BASE_URL", "https://acestep.io").rstrip("/")
+    tags = f"{style}, {vocal_type}, polished studio production, clear lead vocal, coherent verse and chorus"
+    payload = {
+        "tags": tags,
+        "lyrics": lyrics.strip(),
+        "seconds": int(duration_sec),
+        "steps": int(safe_secret("ACESTEP_STEPS", "12")),
+        "studio_quality": True,
+    }
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "NavaBharat-AI/8.0",
+    }
+
+    try:
+        response = requests.post(
+            f"{base_url}/api/v2/generate-audio",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if body.get("code") not in (0, None):
+            return None, None, None, str(body.get("msg") or body.get("error") or "ACE-Step generation request failed")
+
+        tasks = ((body.get("data") or {}).get("tasks") or [])
+        task_id = (tasks[0] or {}).get("task_id") if tasks else None
+        if not task_id:
+            return None, None, None, "ACE-Step did not return a task ID."
+
+        progress_placeholder = st.empty()
+        for attempt in range(60):
+            status_response = requests.get(
+                f"{base_url}/api/v2/task-status/{task_id}",
+                headers=headers,
+                timeout=30,
+            )
+            status_response.raise_for_status()
+            status_body = status_response.json()
+            data = status_body.get("data") or {}
+            status = str(data.get("status", "")).lower()
+            progress = data.get("progress")
+            if progress is not None:
+                progress_placeholder.caption(f"ACE-Step generation: {progress}% · {status or 'processing'}")
+
+            if status == "completed":
+                audio_url = data.get("audio_url")
+                if not audio_url:
+                    return None, None, None, "ACE-Step completed but returned no audio URL."
+                audio_response = requests.get(audio_url, timeout=120)
+                audio_response.raise_for_status()
+                progress_placeholder.empty()
+                return audio_response.content, "audio/mpeg", "mp3", ""
+
+            if status in {"failed", "cancelled", "expired"}:
+                progress_placeholder.empty()
+                return None, None, None, str(data.get("message") or f"ACE-Step task status: {status}")
+
+            time.sleep(2)
+
+        progress_placeholder.empty()
+        return None, None, None, "ACE-Step generation timed out while waiting for the task to complete."
+    except Exception as exc:
+        return None, None, None, clean_error(exc)
 
 
 def generate_song_track(duration_sec: int, style: str, lyrics: str, vocal_type: str):
@@ -1413,9 +1561,22 @@ def page_music_generator():
                 )
                 ok, composition = gemini_generate(prompt)
                 try:
-                    audio_data, mime_type, fmt = generate_song_track(
-                        duration_sec, genre_style, lyrics_input, vocal_type
-                    )
+                    ace_key = acestep_key()
+                    if ace_key:
+                        st.info("Using ACE-Step AI music generation for real vocals + instruments.")
+                        audio_data, mime_type, fmt, music_error = generate_song_with_acestep(
+                            duration_sec, genre_style, lyrics_input, vocal_type
+                        )
+                        if not audio_data:
+                            st.error(f"ACE-Step song generation failed: {music_error}")
+                            st.info("No synthetic substitute was played because a real-song API key is configured.")
+                            return
+                    else:
+                        st.warning("ACE-Step key is not configured, so the app is using the local instrumental fallback. Add ACESTEP_API_KEY to enable real AI songs with vocals.")
+                        audio_data, mime_type, fmt = generate_song_track(
+                            duration_sec, genre_style, lyrics_input, vocal_type
+                        )
+
                     st.audio(audio_data, format=mime_type)
                     st.download_button(
                         f"⬇️ Download Song (.{fmt})",
@@ -1428,7 +1589,7 @@ def page_music_generator():
                         st.markdown("### 🎼 AI Arrangement")
                         render_answer(composition)
                     else:
-                        st.info("Audio was generated locally. Gemini arrangement text was unavailable.")
+                        st.info("Gemini arrangement text was unavailable, but the audio generation path completed.")
                 except Exception as exc:
                     st.error(f"Song generation failed: {clean_error(exc)}")
 
@@ -1699,8 +1860,14 @@ def page_about():
 
     with c2:
         st.markdown("### 🔧 API & Secret Status")
-        if gemini_key(): st.success("✅ GEMINI_API_KEY is configured")
-        else: st.error("❌ GEMINI_API_KEY is missing in secrets")
+        if gemini_keys():
+            st.success(f"✅ Gemini API keys configured: {len(gemini_keys())} (automatic failover enabled)")
+        else:
+            st.error("❌ Gemini API key is missing in secrets")
+        if acestep_key():
+            st.success("✅ ACE-Step music API key configured (real song generation enabled)")
+        else:
+            st.warning("⚠️ ACE-Step API key not configured (local synthetic fallback only)")
 
         ga_sec = safe_secret("GA_MEASUREMENT_ID")
         if ga_sec:
@@ -1714,10 +1881,10 @@ def page_about():
             st.success("✅ Google site-verification token configured")
         else:
             st.warning("⚠️ GOOGLE_SITE_VERIFICATION secret not configured")
-        if safe_secret("MONETAG_VERIFICATION_META"):
-            st.success("✅ Monetag verification token configured")
+        if safe_secret("MONETAG_VERIFICATION_TAG") or safe_secret("MONETAG_VERIFICATION_META"):
+            st.success("✅ Monetag verification code configured")
         else:
-            st.warning("⚠️ MONETAG_VERIFICATION_META secret not configured")
+            st.warning("⚠️ MONETAG_VERIFICATION_TAG secret not configured")
 
         if ffmpeg_bin(): st.success("✅ FFmpeg MP3 Encoder active")
         else: st.warning("⚠️ FFmpeg binary not detected (WAV fallback active)")
@@ -1749,7 +1916,34 @@ NAVIGATION = {
 # MAIN ENTRYPOINT
 # ============================================================
 
+def render_runtime_tags():
+    """Run client-side GA4 in the actual Streamlit document when supported."""
+    ga_id = safe_secret("GA_MEASUREMENT_ID")
+    if not ga_id:
+        return
+    tag_html = f"""
+    <script async src="https://www.googletagmanager.com/gtag/js?id={html.escape(ga_id)}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{dataLayer.push(arguments);}}
+      gtag('js', new Date());
+      gtag('config', '{html.escape(ga_id)}');
+    </script>
+    """
+    try:
+        if hasattr(st, "html"):
+            st.html(tag_html, unsafe_allow_javascript=True)
+        else:
+            components.html(tag_html, height=0, width=0)
+    except Exception:
+        try:
+            components.html(tag_html, height=0, width=0)
+        except Exception:
+            pass
+
+
 def main():
+    render_runtime_tags()
     st.sidebar.markdown(f'<div class="sidebar-brand"><div class="mark">🇮🇳</div><div class="name">{APP_NAME}</div><div class="tag">{TAGLINE}</div></div>', unsafe_allow_html=True)
     st.sidebar.markdown('<div class="nav-caption">Navigation Menu</div>', unsafe_allow_html=True)
 
@@ -1761,7 +1955,6 @@ def main():
         list(NAVIGATION.keys()),
         index=list(NAVIGATION.keys()).index(st.session_state["nav"]) if st.session_state["nav"] in NAVIGATION else 0,
         label_visibility="collapsed",
-        key="nav_radio",
     )
 
     if selected_page != st.session_state["nav"]:
