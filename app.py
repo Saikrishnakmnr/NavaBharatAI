@@ -629,7 +629,6 @@ def gemini_keys():
         "GEMINI_AI_KEY_1",
         "GEMINI_AI_KEY_2",
         "GEMINI_AI_KEY_3",
-        "GOOGLE_API_KEY",
     ):
         value = safe_secret(name)
         if value and value not in values:
@@ -650,15 +649,9 @@ def gemini_key():
 
 def configured_models():
     primary = safe_secret("GEMINI_MODEL", "gemini-3.8-flash")
-    models = [
-        primary,
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-    ]
-    return list(dict.fromkeys(x for x in models if x))
+    # Only use currently documented stable Gemini API model IDs.
+    models = [primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    return list(dict.fromkeys(x.strip() for x in models if x.strip()))
 
 
 # ============================================================
@@ -684,50 +677,57 @@ def clean_error(exc):
 
 
 def gemini_generate(prompt: str, grounded: bool = False, retries: int = 2):
+    """Reliable Gemini text generation with explicit API-key authentication.
+
+    Non-grounded requests use the REST API directly so an OAuth token accidentally
+    stored under GOOGLE_API_KEY cannot interfere with the configured Gemini keys.
+    Grounded requests use the SDK because Google Search grounding is a tool feature.
+    """
     keys = gemini_keys()
     if not keys:
         return False, "Gemini is not connected. Add GEMINI_API_KEY (and optionally GEMINI_API_KEY_2) to Streamlit Secrets."
 
-    try:
-        from google.genai import types
-    except Exception as exc:
-        return False, f"Gemini SDK import failed: {clean_error(exc)}"
-
     last_error = ""
+    models = configured_models()
     for api_key in keys:
-        client = get_gemini_client(api_key)
-        if client is None:
-            continue
-        for model in configured_models():
+        for model in models:
             for attempt in range(retries + 1):
                 try:
-                    config = None
                     if grounded:
-                        config = types.GenerateContentConfig(
-                            tools=[types.Tool(google_search=types.GoogleSearch())]
+                        client = get_gemini_client(api_key)
+                        if client is None:
+                            raise RuntimeError("Gemini client could not be created")
+                        from google.genai import types
+                        config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+                        response = client.models.generate_content(model=model, contents=prompt, config=config)
+                        answer = getattr(response, "text", None)
+                    else:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.4},
+                        }
+                        response = requests.post(
+                            url, headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                            json=payload, timeout=90
                         )
-                    response = client.models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=config,
-                    )
-                    answer = getattr(response, "text", None)
-                    if answer:
-                        return True, answer
+                        if not response.ok:
+                            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:1200]}")
+                        data = response.json()
+                        parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+                        answer = "".join(str(part.get("text", "")) for part in parts if part.get("text"))
+                    if answer and answer.strip():
+                        return True, answer.strip()
                     last_error = f"{model}: empty response"
                     break
                 except Exception as exc:
                     raw = str(exc)
                     last_error = f"{model}: {clean_error(exc)}"
-                    transient = any(k in raw for k in [
-                        "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED",
-                        "deadline", "timeout", "temporarily",
-                    ])
+                    transient = any(k in raw.upper() for k in ["429", "500", "502", "503", "504", "TIMEOUT", "DEADLINE", "UNAVAILABLE", "RESOURCE_EXHAUSTED"])
                     if transient and attempt < retries:
-                        time.sleep(1.2 * (2 ** attempt))
+                        time.sleep(1.5 * (2 ** attempt))
                         continue
                     break
-
     return False, f"Gemini temporarily unavailable. Detail: {last_error}"
 
 
@@ -1061,85 +1061,44 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
-    """Generate/edit an image with Gemini's native image models.
-
-    Uses all configured Gemini keys as failover. We deliberately do NOT fall
-    back to an unrelated third-party image generator: if Gemini fails, the UI
-    reports the actual error instead of showing an unrelated image.
-    """
+    """Generate/edit with Google's documented Gemini 3.1 Flash Image API."""
     keys = gemini_keys()
     if not keys:
         return None, None, "No Gemini API key is configured."
-
-    try:
-        import base64
-    except Exception as exc:
-        return None, None, clean_error(exc)
-
-    models = [
-        safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
-        "gemini-3.1-flash-image",
-        "gemini-3-pro-image",
-    ]
-    models = list(dict.fromkeys(x for x in models if x))
+    import base64
     last_error = ""
-
+    model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
     for api_key in keys:
-        client = get_gemini_client(api_key)
-        if client is None:
-            continue
-
-        if image_bytes:
-            inputs = [
-                {
-                    "type": "image",
-                    "data": base64.b64encode(image_bytes).decode("utf-8"),
-                    "mime_type": mime_type or "image/png",
-                },
-                {
-                    "type": "text",
-                    "text": prompt,
-                },
-            ]
-        else:
-            inputs = prompt
-
-        for model in models:
-            try:
-                interaction = client.interactions.create(
-                    model=model,
-                    input=inputs,
-                    response_format={
-                        "type": "image",
-                        "mime_type": "image/png",
-                        "aspect_ratio": aspect_ratio,
-                        "image_size": image_size,
-                    },
-                )
-                output_image = getattr(interaction, "output_image", None)
-                if output_image and getattr(output_image, "data", None):
-                    return (
-                        base64.b64decode(output_image.data),
-                        getattr(output_image, "mime_type", "image/png"),
-                        "",
-                    )
-
-                # Newer SDK responses can expose image blocks through steps.
-                for step in getattr(interaction, "steps", []) or []:
-                    if getattr(step, "type", None) != "model_output":
-                        continue
-                    for block in getattr(step, "content", []) or []:
-                        if getattr(block, "type", None) == "image" and getattr(block, "data", None):
-                            return (
-                                base64.b64decode(block.data),
-                                getattr(block, "mime_type", "image/png"),
-                                "",
-                            )
-                last_error = f"{model}: no image returned"
-            except Exception as exc:
-                last_error = f"{model}: {clean_error(exc)}"
+        try:
+            inputs = []
+            if image_bytes:
+                inputs.append({"type": "image", "mime_type": mime_type or "image/png", "data": base64.b64encode(image_bytes).decode("utf-8")})
+            inputs.append({"type": "text", "text": prompt})
+            payload = {
+                "model": model,
+                "input": inputs,
+                "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": aspect_ratio, "image_size": image_size},
+            }
+            response = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/interactions",
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=payload, timeout=180
+            )
+            if not response.ok:
+                last_error = f"{model}: HTTP {response.status_code}: {response.text[:1200]}"
                 continue
-
+            body = response.json()
+            out = body.get("output_image") or {}
+            data = out.get("data") if isinstance(out, dict) else None
+            if data:
+                return base64.b64decode(data), out.get("mime_type", "image/png"), ""
+            for step in body.get("steps", []) or []:
+                for block in step.get("content", []) or []:
+                    if block.get("type") == "image" and block.get("data"):
+                        return base64.b64decode(block["data"]), block.get("mime_type", "image/png"), ""
+            last_error = f"{model}: no image returned"
+        except Exception as exc:
+            last_error = f"{model}: {clean_error(exc)}"
     return None, None, last_error or "No image was returned by Gemini."
 
 
@@ -1360,31 +1319,24 @@ def generate_song_with_acestep(duration_sec: int, style: str, lyrics: str, vocal
     # Give ACE-Step enough musical context to produce a complete song rather than
     # an instrumental loop. Lyrics are kept verbatim and vocals are explicitly requested.
     prompt = (
-        f"Create a complete finished song in the style of {style}. "
+        f"<prompt>Create a complete finished song in the style of {style}. "
         f"Use {vocal_type}. Include clear lead vocals, musical accompaniment, "
-        f"drums/bass/harmony appropriate to the genre, a distinct verse and chorus, "
+        f"drums, bass and harmony appropriate to the genre, a distinct verse and chorus, "
         f"and a polished beginning and ending. Do not make it instrumental. "
-        f"Perform the supplied lyrics naturally and keep the lyrics' language."
+        f"Perform the supplied lyrics naturally and keep the lyrics language.</prompt>\n"
+        f"<lyrics>{lyrics.strip()}</lyrics>"
     )
 
     payload = {
         "model": model,
-        "messages": [{
-            "role": "user",
-            "content": f"{prompt}\n\nLYRICS:\n{lyrics.strip()}"
-        }],
-        "modalities": ["audio"],
-        "stream": False,
-        "task_type": "text2music",
-        "thinking": True,
-        "use_cot_caption": True,
-        "use_cot_language": True,
+        "messages": [{"role": "user", "content": prompt}],
         "audio_config": {
             "format": "mp3",
             "vocal_language": vocal_language,
             "instrumental": False,
             "duration": float(duration_sec),
         },
+        "use_cot_caption": False,
     }
     headers = {
         "Authorization": f"Bearer {key}",
@@ -1399,10 +1351,16 @@ def generate_song_with_acestep(duration_sec: int, style: str, lyrics: str, vocal
             f"{base_url}/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=max(180, int(duration_sec) * 20),
+            timeout=75,
         )
         if not response.ok:
             detail = response.text[:3000]
+            if response.status_code == 504:
+                return None, None, None, (
+                    "ACE-Step cloud is currently overloaded and Cloudflare timed out the generation (HTTP 504). "
+                    "This is a remote-service failure, not a Streamlit code error. Please retry after a short wait, "
+                    "or use a shorter 5–10 second generation while the cloud queue is busy."
+                )
             return None, None, None, (
                 f"ACE-Step API HTTP {response.status_code} at {base_url}/v1/chat/completions: {detail}"
             )
@@ -1583,18 +1541,135 @@ def generate_song_track(duration_sec: int, style: str, lyrics: str, vocal_type: 
     return wav_bytes, "audio/wav", "wav"
 
 
+def _extract_gemini_music_audio(body):
+    """Extract Lyria audio + lyrics from the Gemini Interactions REST response."""
+    audio_b64 = None
+    audio_mime = "audio/mpeg"
+    text_parts = []
+
+    # Current Interactions responses expose generated content inside steps.
+    for step in body.get("steps", []) or []:
+        if not isinstance(step, dict) or step.get("type") != "model_output":
+            continue
+        for block in step.get("content", []) or []:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "audio" and block.get("data"):
+                audio_b64 = block.get("data")
+                audio_mime = block.get("mime_type") or block.get("mimeType") or "audio/mpeg"
+            elif btype in ("text", "output_text"):
+                value = block.get("text") or block.get("data") or ""
+                if value:
+                    text_parts.append(str(value))
+
+    # Convenience properties documented by Google.
+    output_audio = body.get("output_audio") or body.get("outputAudio")
+    if not audio_b64 and isinstance(output_audio, dict):
+        audio_b64 = output_audio.get("data")
+        audio_mime = output_audio.get("mime_type") or output_audio.get("mimeType") or audio_mime
+    output_text = body.get("output_text") or body.get("outputText")
+    if output_text and not text_parts:
+        text_parts.append(str(output_text))
+
+    if not audio_b64:
+        return None, None, "Gemini Lyria returned no audio data."
+    try:
+        raw = base64.b64decode(audio_b64)
+    except Exception as exc:
+        return None, None, f"Could not decode Gemini music audio: {clean_error(exc)}"
+    if not raw:
+        return None, None, "Gemini Lyria returned empty audio data."
+
+    mime = str(audio_mime or "audio/mpeg").lower()
+    if "wav" in mime:
+        ext = "wav"
+        mime = "audio/wav"
+    elif "ogg" in mime:
+        ext = "ogg"
+        mime = "audio/ogg"
+    else:
+        ext = "mp3"
+        mime = "audio/mpeg"
+    return raw, (mime, ext), "\n\n".join(text_parts).strip()
+
+
+def generate_song_with_gemini_lyria(duration_sec: int, style: str, lyrics: str, vocal_type: str):
+    """Generate real music through Google's current Lyria 3.5 Gemini API.
+
+    Uses both configured Gemini keys as failover credentials. This is a real
+    music-generation endpoint: it returns generated audio, not a synthesized tone.
+    """
+    keys = gemini_keys()
+    if not keys:
+        return None, None, None, "No Gemini API key is configured."
+
+    model = safe_secret("GEMINI_MUSIC_MODEL", "lyria-3.5")
+    language_hint = "Use the same language as the supplied lyrics/topic."
+    if not lyrics.strip():
+        lyrics = "Create original lyrics matching the requested theme."
+
+    prompt = f"""
+Create an original finished song, not a sound effect and not an instrumental loop.
+Style/genre: {style}
+Vocal arrangement: {vocal_type}
+Target duration: approximately {duration_sec} seconds.
+{language_hint}
+Use clear human-like singing vocals, drums, bass, harmony, melody and a polished full arrangement.
+Structure the song with an intro, verse/chorus movement where appropriate, and a musical ending.
+Do not imitate or clone a named real artist's voice.
+Do not use copyrighted lyrics unless they were supplied by the user.
+User lyrics or song topic:
+{lyrics.strip()}
+""".strip()
+
+    last_error = ""
+    for key_index, api_key in enumerate(keys, start=1):
+        try:
+            url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+            payload = {
+                "model": model,
+                "input": prompt,
+            }
+            response = requests.post(
+                url,
+                headers={
+                    "x-goog-api-key": api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=180,
+            )
+            if not response.ok:
+                last_error = f"Gemini music key {key_index}: HTTP {response.status_code}: {response.text[:1000]}"
+                continue
+            body = response.json()
+            audio_bytes, file_info, lyrics_text = _extract_gemini_music_audio(body)
+            if audio_bytes:
+                mime, ext = file_info
+                return audio_bytes, mime, ext, lyrics_text
+            last_error = f"Gemini music key {key_index}: {lyrics_text or 'no audio returned'}"
+        except requests.exceptions.Timeout:
+            last_error = f"Gemini music key {key_index}: request timed out."
+        except Exception as exc:
+            last_error = f"Gemini music key {key_index}: {clean_error(exc)}"
+
+    return None, None, None, last_error or "Gemini Lyria music generation failed."
+
+
 def page_music_generator():
     st.markdown(
-        '<div class="neon-hero"><h1>🎼 Free AI Song Generator</h1>'
-        '<p>Generates an actual playable song-like track instead of only returning a music blueprint.</p></div>',
+        '<div class="neon-hero"><h1>🎼 AI Music & Song Generator</h1>'
+        '<p>Real AI-generated songs with vocals and instruments. Gemini Lyria 3.5 is primary; ACE-Step is the backup service.</p></div>',
         unsafe_allow_html=True,
     )
     c1, c2 = st.columns([2, 1])
     with c1:
         lyrics_input = st.text_area(
             "📝 Lyrics or Song Topic",
-            height=160,
-            placeholder="Write lyrics or a topic. Example: Telugu motivational song about success...",
+            height=180,
+            placeholder="Write original lyrics or describe a song. Example: Telugu motivational song about success...",
             key="mgen_lyrics",
         )
     with c2:
@@ -1607,64 +1682,72 @@ def page_music_generator():
             key="mgen_genre",
         )
         duration_sec = st.selectbox(
-            "⏱️ Duration",
-            [5, 10, 30, 60],
-            index=3,
+            "⏱️ Target Duration",
+            [30, 60, 90, 120],
+            index=1,
             format_func=lambda x: f"{x} seconds",
             key="mgen_duration",
         )
         vocal_type = st.selectbox(
-            "🎤 Arrangement",
-            ["Solo Male Vocalist", "Solo Female Vocalist", "Male & Female Chorus Duet", "High Tempo Instrumental Beats"],
+            "🎤 Vocal Arrangement",
+            ["Solo Male Vocalist", "Solo Female Vocalist", "Male & Female Chorus Duet", "Instrumental"],
             key="mgen_vocal",
         )
 
-    if st.button("🎼 Generate Song Track", key="mgen_btn"):
+    st.caption("Primary: Google Gemini Lyria 3.5 • Backup: ACE-Step cloud. Your second Gemini key is used automatically if the first key fails.")
+
+    if st.button("🎼 Generate Real AI Song", key="mgen_btn"):
         if not lyrics_input.strip():
-            st.warning("Please enter lyrics or a song topic.")
-        else:
-            with st.spinner(f"Generating a {duration_sec}-second song track..."):
-                # Gemini supplies a useful musical arrangement/lyric structure,
-                # while the local renderer guarantees an actual audio file.
-                prompt = (
-                    f"Create a concise song arrangement for: {lyrics_input}\n"
-                    f"Genre: {genre_style}; Duration: {duration_sec}s; Arrangement: {vocal_type}.\n"
-                    "Return title, BPM, chord progression, melody notes and a time-coded lyric structure."
+            st.warning("Please enter original lyrics or a song topic.")
+            return
+
+        with st.spinner(f"Generating a real {duration_sec}-second AI song with vocals and instruments..."):
+            audio_data = None
+            mime_type = None
+            fmt = None
+            song_text = ""
+            primary_error = ""
+
+            # PRIMARY: Gemini Lyria 3.5. This path does not depend on ACE-Step.
+            try:
+                audio_data, mime_type, fmt, song_text = generate_song_with_gemini_lyria(
+                    duration_sec, genre_style, lyrics_input, vocal_type
                 )
-                ok, composition = gemini_generate(prompt)
+                if audio_data:
+                    st.success("✅ Song generated with Gemini Lyria 3.5.")
+            except Exception as exc:
+                primary_error = clean_error(exc)
+
+            # SECONDARY: ACE-Step only if Gemini music generation fails.
+            if not audio_data:
+                st.warning("Gemini Lyria did not return audio. Trying ACE-Step backup...")
                 try:
-                    ace_key = acestep_key()
-                    if ace_key:
-                        st.info("Using ACE-Step AI music generation for real vocals + instruments.")
-                        audio_data, mime_type, fmt, music_error = generate_song_with_acestep(
-                            duration_sec, genre_style, lyrics_input, vocal_type
-                        )
-                        if not audio_data:
-                            st.error(f"ACE-Step song generation failed: {music_error}")
-                            st.info("No synthetic substitute was played because a real-song API key is configured.")
-                            return
-                    else:
-                        st.warning("ACE-Step key is not configured, so the app is using the local instrumental fallback. Add ACESTEP_API_KEY to enable real AI songs with vocals.")
-                        audio_data, mime_type, fmt = generate_song_track(
-                            duration_sec, genre_style, lyrics_input, vocal_type
-                        )
-
-                    st.audio(audio_data, format=mime_type)
-                    st.download_button(
-                        f"⬇️ Download Song (.{fmt})",
-                        data=audio_data,
-                        file_name=f"navabharat_ai_song_{duration_sec}s.{fmt}",
-                        mime=mime_type,
-                        key="dl_generated_song_file",
+                    audio_data, mime_type, fmt, ace_error = generate_song_with_acestep(
+                        duration_sec, genre_style, lyrics_input, vocal_type
                     )
-                    if ok:
-                        st.markdown("### 🎼 AI Arrangement")
-                        render_answer(composition)
+                    if audio_data:
+                        st.success("✅ Song generated with ACE-Step backup.")
                     else:
-                        st.info("Gemini arrangement text was unavailable, but the audio generation path completed.")
+                        primary_error = f"Gemini: {primary_error or 'no audio returned'} | ACE-Step: {ace_error}"
                 except Exception as exc:
-                    st.error(f"Song generation failed: {clean_error(exc)}")
+                    primary_error = f"Gemini: {primary_error or 'no audio returned'} | ACE-Step: {clean_error(exc)}"
 
+            if not audio_data:
+                st.error(f"Real AI music generation failed: {primary_error}")
+                st.info("No fake/synthetic music is played. Check both Gemini API keys and, if needed, the ACE-Step key.")
+                return
+
+            st.audio(audio_data, format=mime_type)
+            st.download_button(
+                f"⬇️ Download AI Song (.{fmt})",
+                data=audio_data,
+                file_name=f"navabharat_ai_song_{duration_sec}s.{fmt}",
+                mime=mime_type,
+                key="dl_generated_song_file",
+            )
+            if song_text:
+                st.markdown("### 🎤 Generated Lyrics / Music Notes")
+                render_answer(song_text)
 
 def page_science():
     st.markdown('<div class="hero"><h1>🔬 AI Science Solver</h1><p>Specialized solver for Physics, Chemistry, Biology, Mathematics, and Engineering topics.</p></div>', unsafe_allow_html=True)
@@ -1723,8 +1806,11 @@ def page_live():
             else:
                 with st.spinner("Searching live web..."):
                     ok, answer = gemini_generate(query, grounded=True)
-                    if ok: render_answer(answer)
-                    else: st.error(answer)
+                    if ok:
+                        render_answer(answer)
+                    else:
+                        st.warning("Live AI search is temporarily unavailable. RSS news feeds below are still available.")
+                        st.caption(answer)
 
     with tab2:
         lang = st.selectbox("Select News Language Feed", list(RSS_FEEDS.keys()), key="rss_lang")
