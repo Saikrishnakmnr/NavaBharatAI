@@ -1201,55 +1201,94 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
-    """Generate/edit with Gemini 3.1 Flash Image using the documented Interactions API."""
-    keys = gemini_keys()
+    """Generate/edit with Gemini 3.1 Flash Image via the documented Interactions API.
+
+    Image generation is intentionally isolated from the normal text-key pool.
+    A dedicated GEMINI_IMAGE_API_KEY / GEMINI_IMAGE_API_KEY_2 may be supplied
+    when a project's normal Gemini key has API restrictions.
+    """
+    keys = []
+    # Prefer dedicated image keys, then fall back to the existing Gemini keys.
+    for name in ("GEMINI_IMAGE_API_KEY", "GEMINI_IMAGE_API_KEY_2"):
+        value = safe_secret(name)
+        if value and value not in keys:
+            keys.append(value)
+    for value in gemini_keys():
+        if value and value not in keys:
+            keys.append(value)
     if not keys:
         return None, None, "No Gemini API key is configured."
-    last_error = ""
+
     model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+    last_error = ""
+    blocked_keys = []
+
+    # Google documents x-goog-api-key for the Gemini Interactions REST API.
+    # Do not send API keys as Bearer tokens: that is an OAuth credential mode
+    # and can produce ACCESS_TOKEN_TYPE_UNSUPPORTED / misleading 401 errors.
     for key_index, api_key in enumerate(keys, start=1):
-        for bearer in (False, True):
-            try:
-                inputs = []
-                if image_bytes:
-                    inputs.append({"type": "image", "mime_type": mime_type or "image/png", "data": base64.b64encode(image_bytes).decode("utf-8")})
-                inputs.append({"type": "text", "text": prompt})
-                payload = {
-                    "model": model,
-                    "input": inputs,
-                    "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": aspect_ratio, "image_size": image_size},
-                }
-                response = requests.post(
-                    "https://generativelanguage.googleapis.com/v1beta/interactions",
-                    headers=_gemini_auth_headers(api_key, bearer=bearer),
-                    json=payload, timeout=180,
-                )
-                raw = response.text[:1600]
-                if not response.ok:
-                    last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}, {'Bearer' if bearer else 'x-goog-api-key'}): {raw}"
-                    if _gemini_is_auth_error(response.status_code, raw):
-                        continue
+        try:
+            inputs = []
+            if image_bytes:
+                inputs.append({
+                    "type": "image",
+                    "mime_type": mime_type or "image/png",
+                    "data": base64.b64encode(image_bytes).decode("utf-8"),
+                })
+            inputs.append({"type": "text", "text": prompt})
+            payload = {
+                "model": model,
+                "input": inputs,
+                "response_format": {
+                    "type": "image",
+                    "mime_type": "image/png",
+                    "aspect_ratio": aspect_ratio,
+                    "image_size": image_size,
+                },
+            }
+            response = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/interactions",
+                headers=_gemini_auth_headers(api_key, bearer=False),
+                json=payload,
+                timeout=180,
+            )
+            raw = response.text[:1800]
+            if not response.ok:
+                last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}, x-goog-api-key): {raw}"
+                if response.status_code in (401, 403) and "API_KEY_SERVICE_BLOCKED" in raw.upper():
+                    blocked_keys.append(str(key_index))
+                continue
+
+            body = response.json()
+            out = body.get("output_image") or body.get("outputImage") or {}
+            data = out.get("data") if isinstance(out, dict) else None
+            if data:
+                return base64.b64decode(data), out.get("mime_type") or out.get("mimeType") or "image/png", ""
+
+            # Some Interactions responses expose image blocks inside steps.
+            for step in body.get("steps", []) or []:
+                if not isinstance(step, dict):
                     continue
-                body = response.json()
-                out = body.get("output_image") or body.get("outputImage") or {}
-                data = out.get("data") if isinstance(out, dict) else None
-                if data:
-                    return base64.b64decode(data), out.get("mime_type") or out.get("mimeType") or "image/png", ""
-                for step in body.get("steps", []) or []:
-                    if not isinstance(step, dict):
-                        continue
-                    for block in step.get("content", []) or []:
-                        if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
-                            return base64.b64decode(block["data"]), block.get("mime_type") or block.get("mimeType") or "image/png", ""
-                last_error = f"Gemini image key {key_index}: successful request but no image block was returned."
-            except Exception as exc:
-                last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
-    if any(x in last_error.upper() for x in ["401", "403", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "UNAUTHENTICATED", "INVALID_API_KEY"]):
+                for block in step.get("content", []) or []:
+                    if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                        return (
+                            base64.b64decode(block["data"]),
+                            block.get("mime_type") or block.get("mimeType") or "image/png",
+                            "",
+                        )
+            last_error = f"Gemini image key {key_index}: successful request but no image block was returned."
+        except Exception as exc:
+            last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
+
+    if blocked_keys:
         return None, None, (
-            "Gemini image authentication was rejected. The app tried both current Gemini authentication header styles "
-            "with both configured keys. If both fail, replace the Gemini keys in Streamlit Secrets with fresh AI Studio auth keys. "
+            "Gemini image access is blocked for the configured API key/project (API_KEY_SERVICE_BLOCKED). "
+            "The Gemini image model uses the Interactions API, and this is separate from whether the same key can call normal Gemini text models. "
+            "Create/use an AI Studio API key from a project with the Gemini API/Interactions service allowed, or set GEMINI_IMAGE_API_KEY in Streamlit Secrets to a key from that project. "
             + last_error
         )
+    if any(x in last_error.upper() for x in ["401", "403", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "UNAUTHENTICATED", "INVALID_API_KEY"]):
+        return None, None, "Gemini image authentication/access was rejected. Check the image API key/project restriction. " + last_error
     return None, None, last_error or "No image was returned by Gemini."
 
 
