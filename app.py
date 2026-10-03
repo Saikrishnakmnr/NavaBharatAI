@@ -1302,7 +1302,7 @@ def generate_song_with_acestep(duration_sec: int, style: str, lyrics: str, vocal
     if not key:
         return None, None, None, "ACESTEP_API_KEY/ACE_API_KEY/ACE_APP_KEY is not configured."
 
-    base_url = safe_secret("ACESTEP_BASE_URL", "https://acestep.io").rstrip("/")
+    base_url = safe_secret("ACESTEP_BASE_URL", "https://api.acemusic.ai").rstrip("/")
     tags = f"{style}, {vocal_type}, polished studio production, clear lead vocal, coherent verse and chorus"
     payload = {
         "tags": tags,
