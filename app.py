@@ -44,7 +44,7 @@ def inject_tracking_scripts():
             return os.getenv(name, default).strip()
         ga_id = _early_secret("GA_MEASUREMENT_ID", "G-39MNX1V7XK")
         monetag_id = _early_secret("MONETAG_ZONE_ID", "11941649")
-        google_verification = _early_secret("GOOGLE_SITE_VERIFICATION")
+        google_verification = _early_secret("GOOGLE_SITE_VERIFICATION", "google3e42fef32ee1bbbd.html")
         monetag_verification_tag = _early_secret("MONETAG_VERIFICATION_TAG")
         monetag_verification_legacy = _early_secret("MONETAG_VERIFICATION_META")
 
@@ -681,11 +681,55 @@ def clean_error(exc):
     return text[:1600]
 
 
-def gemini_generate(prompt: str, grounded: bool = False, retries: int = 1):
-    """Generate text with Gemini using only configured Gemini credentials.
+def _gemini_auth_headers(api_key: str, bearer: bool = False):
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        headers["x-goog-api-key"] = api_key
+    return headers
 
-    Authentication failures are treated as credential failures, not as model failures.
-    This prevents the UI from misleadingly ending on an old model such as gemini-2.5-flash.
+
+def _gemini_extract_interaction_text(body: dict) -> str:
+    if not isinstance(body, dict):
+        return ""
+    if body.get("output_text"):
+        return str(body["output_text"])
+    output = body.get("output")
+    if isinstance(output, list):
+        parts = []
+        for item in output:
+            if isinstance(item, dict):
+                if item.get("text"):
+                    parts.append(str(item["text"]))
+                for content in item.get("content", []) or []:
+                    if isinstance(content, dict) and content.get("text"):
+                        parts.append(str(content["text"]))
+        if parts:
+            return "".join(parts)
+    for step in body.get("steps", []) or []:
+        if isinstance(step, dict):
+            for content in step.get("content", []) or []:
+                if isinstance(content, dict) and content.get("text"):
+                    return str(content["text"])
+    return ""
+
+
+def _gemini_is_auth_error(status: int, raw: str) -> bool:
+    text = raw.upper()
+    return status in (401, 403) or any(x in text for x in (
+        "UNAUTHENTICATED", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "INVALID AUTHENTICATION",
+        "INVALID_API_KEY", "API KEY NOT VALID", "CREDENTIAL",
+    ))
+
+
+def gemini_generate(prompt: str, grounded: bool = False, retries: int = 1):
+    """Generate Gemini text, supporting both current API-key header styles.
+
+    Current Google documentation supports x-goog-api-key for Gemini API requests;
+    auth keys are also usable with Authorization: Bearer. Trying the second header
+    on an authentication rejection makes the app resilient to the newer auth-key
+    transition without changing the user's prompt or silently using an unrelated model.
     """
     keys = gemini_keys()
     if not keys:
@@ -695,57 +739,69 @@ def gemini_generate(prompt: str, grounded: bool = False, retries: int = 1):
     models = configured_models()
     for key_index, api_key in enumerate(keys, start=1):
         for model in models:
-            for attempt in range(retries + 1):
-                try:
-                    if grounded:
-                        client = get_gemini_client(api_key)
-                        if client is None:
-                            raise RuntimeError("Gemini client could not be created")
-                        from google.genai import types
-                        config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-                        response = client.models.generate_content(model=model, contents=prompt, config=config)
-                        answer = getattr(response, "text", None)
-                    else:
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent"
-                        payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4}}
+            auth_modes = [False, True]
+            for bearer in auth_modes:
+                for attempt in range(retries + 1):
+                    try:
+                        if grounded:
+                            url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+                            payload = {
+                                "model": model,
+                                "input": prompt,
+                                "tools": [{"type": "google_search"}],
+                            }
+                        else:
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent"
+                            payload = {
+                                "contents": [{"parts": [{"text": prompt}]}],
+                                "generationConfig": {"temperature": 0.4},
+                            }
+
                         response = requests.post(
                             url,
-                            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
+                            headers=_gemini_auth_headers(api_key, bearer=bearer),
                             json=payload,
                             timeout=90,
                         )
                         raw = response.text[:1800]
                         if not response.ok:
-                            # 401/403 is credential or access configuration; trying five models
-                            # with the same bad credential only creates misleading errors.
-                            if response.status_code in (401, 403):
-                                raise RuntimeError(f"Gemini credential rejected (HTTP {response.status_code}): {raw}")
+                            if _gemini_is_auth_error(response.status_code, raw):
+                                last_error = f"Gemini key {key_index} / {model}: HTTP {response.status_code} ({'Bearer' if bearer else 'x-goog-api-key'}): {raw}"
+                                # Try the other current authentication header before moving
+                                # to the second configured key.
+                                break
                             raise RuntimeError(f"HTTP {response.status_code}: {raw}")
+
                         data = response.json()
-                        parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
-                        answer = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("text"))
+                        if grounded:
+                            answer = _gemini_extract_interaction_text(data)
+                        else:
+                            parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+                            answer = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("text"))
 
-                    if answer and str(answer).strip():
-                        return True, str(answer).strip()
-                    last_error = f"Gemini key {key_index} / {model}: empty response"
-                    break
-                except Exception as exc:
-                    raw = str(exc)
-                    last_error = f"Gemini key {key_index} / {model}: {clean_error(exc)}"
-                    if any(x in raw.upper() for x in ["401", "UNAUTHENTICATED", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "CREDENTIAL"]):
-                        # Do not keep trying models with a rejected credential.
+                        if answer and str(answer).strip():
+                            return True, str(answer).strip()
+                        last_error = f"Gemini key {key_index} / {model}: empty response"
                         break
-                    transient = any(k in raw.upper() for k in ["429", "500", "502", "503", "504", "TIMEOUT", "DEADLINE", "UNAVAILABLE", "RESOURCE_EXHAUSTED"])
-                    if transient and attempt < retries:
-                        time.sleep(1.5 * (2 ** attempt))
-                        continue
+                    except Exception as exc:
+                        raw_exc = str(exc)
+                        last_error = f"Gemini key {key_index} / {model}: {clean_error(exc)}"
+                        if _gemini_is_auth_error(401, raw_exc):
+                            break
+                        transient = any(k in raw_exc.upper() for k in ["429", "500", "502", "503", "504", "TIMEOUT", "DEADLINE", "UNAVAILABLE", "RESOURCE_EXHAUSTED"])
+                        if transient and attempt < retries:
+                            time.sleep(1.5 * (2 ** attempt))
+                            continue
+                        break
+                # On auth failure, try the other header for this same key/model.
+                if "401" not in last_error and "403" not in last_error and "UNAUTHENTICATED" not in last_error.upper() and "ACCESS_TOKEN_TYPE_UNSUPPORTED" not in last_error.upper():
                     break
 
-    if "ACCESS_TOKEN_TYPE_UNSUPPORTED" in last_error or "UNAUTHENTICATED" in last_error:
+    if any(x in last_error.upper() for x in ["401", "403", "UNAUTHENTICATED", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "INVALID_API_KEY", "API KEY NOT VALID"]):
         return False, (
-            "Gemini authentication was rejected. This is a credential problem, not a prompt/model problem. "
-            "Verify that the complete current Gemini API key is pasted into Streamlit Secrets as GEMINI_API_KEY / GEMINI_API_KEY_2, "
-            "with no quotes inside the value and no truncation. Google documents x-goog-api-key authentication for the Gemini API. "
+            "Gemini authentication was rejected by Google. The app now tries both documented API-key header styles "
+            "for each configured key. If both are rejected, create a fresh Gemini auth key in Google AI Studio, "
+            "replace GEMINI_API_KEY / GEMINI_API_KEY_2, and redeploy. This is not a prompt failure. "
             f"Last check: {last_error}"
         )
     return False, f"Gemini temporarily unavailable. Detail: {last_error}"
@@ -797,11 +853,21 @@ def render_answer(answer):
 # ============================================================
 
 def ffmpeg_bin():
+    """Find FFmpeg from Streamlit/apt packages or the imageio Python bundle."""
+    # Streamlit Community Cloud installs packages.txt with apt-get. Prefer that
+    # real system binary when available. The previous version only checked
+    # imageio_ffmpeg, so a perfectly valid packages.txt installation was missed.
+    system_exe = shutil.which("ffmpeg")
+    if system_exe:
+        return system_exe
     try:
         import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and Path(exe).exists():
+            return exe
     except Exception:
-        return None
+        pass
+    return None
 
 
 def generate_synthesized_music(duration_sec: int = 10, style: str = "Bollywood", requested_format: str = "mp3"):
@@ -1135,53 +1201,54 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
-    """Generate/edit with Gemini 3.1 Flash Image using the Interactions API."""
+    """Generate/edit with Gemini 3.1 Flash Image using the documented Interactions API."""
     keys = gemini_keys()
     if not keys:
         return None, None, "No Gemini API key is configured."
     last_error = ""
     model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
     for key_index, api_key in enumerate(keys, start=1):
-        try:
-            inputs = []
-            if image_bytes:
-                inputs.append({"type": "image", "mime_type": mime_type or "image/png", "data": base64.b64encode(image_bytes).decode("utf-8")})
-            inputs.append({"type": "text", "text": prompt})
-            payload = {
-                "model": model,
-                "input": inputs,
-                "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": aspect_ratio, "image_size": image_size},
-            }
-            response = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/interactions",
-                headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
-                json=payload, timeout=180,
-            )
-            if response.status_code in (401, 403):
-                last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}): {response.text[:1200]}"
-                continue
-            if not response.ok:
-                last_error = f"Gemini image key {key_index}: HTTP {response.status_code}: {response.text[:1200]}"
-                continue
-            body = response.json()
-            out = body.get("output_image") or body.get("outputImage") or {}
-            data = out.get("data") if isinstance(out, dict) else None
-            if data:
-                return base64.b64decode(data), out.get("mime_type") or out.get("mimeType") or "image/png", ""
-            # Official response can also expose image blocks inside model_output steps.
-            for step in body.get("steps", []) or []:
-                if not isinstance(step, dict):
+        for bearer in (False, True):
+            try:
+                inputs = []
+                if image_bytes:
+                    inputs.append({"type": "image", "mime_type": mime_type or "image/png", "data": base64.b64encode(image_bytes).decode("utf-8")})
+                inputs.append({"type": "text", "text": prompt})
+                payload = {
+                    "model": model,
+                    "input": inputs,
+                    "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": aspect_ratio, "image_size": image_size},
+                }
+                response = requests.post(
+                    "https://generativelanguage.googleapis.com/v1beta/interactions",
+                    headers=_gemini_auth_headers(api_key, bearer=bearer),
+                    json=payload, timeout=180,
+                )
+                raw = response.text[:1600]
+                if not response.ok:
+                    last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}, {'Bearer' if bearer else 'x-goog-api-key'}): {raw}"
+                    if _gemini_is_auth_error(response.status_code, raw):
+                        continue
                     continue
-                for block in step.get("content", []) or []:
-                    if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
-                        return base64.b64decode(block["data"]), block.get("mime_type") or block.get("mimeType") or "image/png", ""
-            last_error = f"Gemini image key {key_index}: successful request but no image block was returned."
-        except Exception as exc:
-            last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
-    if "401" in last_error or "ACCESS_TOKEN_TYPE_UNSUPPORTED" in last_error or "UNAUTHENTICATED" in last_error:
+                body = response.json()
+                out = body.get("output_image") or body.get("outputImage") or {}
+                data = out.get("data") if isinstance(out, dict) else None
+                if data:
+                    return base64.b64decode(data), out.get("mime_type") or out.get("mimeType") or "image/png", ""
+                for step in body.get("steps", []) or []:
+                    if not isinstance(step, dict):
+                        continue
+                    for block in step.get("content", []) or []:
+                        if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                            return base64.b64decode(block["data"]), block.get("mime_type") or block.get("mimeType") or "image/png", ""
+                last_error = f"Gemini image key {key_index}: successful request but no image block was returned."
+            except Exception as exc:
+                last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
+    if any(x in last_error.upper() for x in ["401", "403", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "UNAUTHENTICATED", "INVALID_API_KEY"]):
         return None, None, (
-            "Gemini image authentication was rejected. Check both Gemini API keys in Streamlit Secrets; "
-            "this is not an image-prompt failure. " + last_error
+            "Gemini image authentication was rejected. The app tried both current Gemini authentication header styles "
+            "with both configured keys. If both fail, replace the Gemini keys in Streamlit Secrets with fresh AI Studio auth keys. "
+            + last_error
         )
     return None, None, last_error or "No image was returned by Gemini."
 
@@ -1687,26 +1754,20 @@ def _extract_gemini_music_audio(body):
 
 
 def generate_song_with_gemini_lyria(duration_sec: int, style: str, lyrics: str, vocal_type: str):
-    """Generate real music through Google's current Lyria 3.5 Gemini API.
-
-    Uses both configured Gemini keys as failover credentials. This is a real
-    music-generation endpoint: it returns generated audio, not a synthesized tone.
-    """
+    """Generate real music through Google's current Lyria 3.5 Gemini API."""
     keys = gemini_keys()
     if not keys:
         return None, None, None, "No Gemini API key is configured."
 
     model = safe_secret("GEMINI_MUSIC_MODEL", "lyria-3.5")
-    language_hint = "Use the same language as the supplied lyrics/topic."
     if not lyrics.strip():
         lyrics = "Create original lyrics matching the requested theme."
-
     prompt = f"""
 Create an original finished song, not a sound effect and not an instrumental loop.
 Style/genre: {style}
 Vocal arrangement: {vocal_type}
 Target duration: approximately {duration_sec} seconds.
-{language_hint}
+Use the same language as the supplied lyrics/topic.
 Use clear human-like singing vocals, drums, bass, harmony, melody and a polished full arrangement.
 Structure the song with an intro, verse/chorus movement where appropriate, and a musical ending.
 Do not imitate or clone a named real artist's voice.
@@ -1717,37 +1778,31 @@ User lyrics or song topic:
 
     last_error = ""
     for key_index, api_key in enumerate(keys, start=1):
-        try:
-            url = "https://generativelanguage.googleapis.com/v1beta/interactions"
-            payload = {
-                "model": model,
-                "input": prompt,
-                "response_format": {"type": "audio"},
-            }
-            response = requests.post(
-                url,
-                headers={
-                    "x-goog-api-key": api_key,
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                json=payload,
-                timeout=180,
-            )
-            if not response.ok:
-                last_error = f"Gemini music key {key_index}: HTTP {response.status_code}: {response.text[:1000]}"
-                continue
-            body = response.json()
-            audio_bytes, file_info, lyrics_text = _extract_gemini_music_audio(body)
-            if audio_bytes:
-                mime, ext = file_info
-                return audio_bytes, mime, ext, lyrics_text
-            last_error = f"Gemini music key {key_index}: {lyrics_text or 'no audio returned'}"
-        except requests.exceptions.Timeout:
-            last_error = f"Gemini music key {key_index}: request timed out."
-        except Exception as exc:
-            last_error = f"Gemini music key {key_index}: {clean_error(exc)}"
-
+        for bearer in (False, True):
+            try:
+                response = requests.post(
+                    "https://generativelanguage.googleapis.com/v1beta/interactions",
+                    headers=_gemini_auth_headers(api_key, bearer=bearer),
+                    json={"model": model, "input": prompt, "response_format": {"type": "audio"}},
+                    timeout=240,
+                )
+                raw = response.text[:1200]
+                if not response.ok:
+                    last_error = f"Gemini music key {key_index}: HTTP {response.status_code} ({'Bearer' if bearer else 'x-goog-api-key'}): {raw}"
+                    if _gemini_is_auth_error(response.status_code, raw):
+                        continue
+                    break
+                body = response.json()
+                audio_bytes, file_info, lyrics_text = _extract_gemini_music_audio(body)
+                if audio_bytes:
+                    mime, ext = file_info
+                    return audio_bytes, mime, ext, lyrics_text
+                last_error = f"Gemini music key {key_index}: {lyrics_text or 'no audio returned'}"
+                break
+            except requests.exceptions.Timeout:
+                last_error = f"Gemini music key {key_index}: request timed out."
+            except Exception as exc:
+                last_error = f"Gemini music key {key_index}: {clean_error(exc)}"
     return None, None, None, last_error or "Gemini Lyria music generation failed."
 
 
@@ -1902,8 +1957,21 @@ def page_live():
                     if ok:
                         render_answer(answer)
                     else:
-                        st.warning("Live AI search is temporarily unavailable. RSS news feeds below are still available.")
-                        st.caption(answer)
+                        # Keep Live Information useful even when Gemini authentication is
+                        # temporarily unavailable: Google News RSS is a real live feed and
+                        # does not depend on the Gemini key.
+                        st.warning("Live AI search is temporarily unavailable, so the app is showing live RSS results for your query instead.")
+                        rss_url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(query) + "&hl=en-IN&gl=IN&ceid=IN:en"
+                        items = fetch_rss(rss_url, limit=12)
+                        if items:
+                            for item in items:
+                                st.markdown(
+                                    f'<div class="card"><h4><a href="{html.escape(item["link"], quote=True)}" target="_blank">{html.escape(item["title"])}</a></h4>'
+                                    f'<p style="font-size:12px;color:#64748b;">{html.escape(item["source"])} · {html.escape(item["pubDate"])}</p></div>',
+                                    unsafe_allow_html=True,
+                                )
+                        else:
+                            st.caption(answer)
 
     with tab2:
         lang = st.selectbox("Select News Language Feed", list(RSS_FEEDS.keys()), key="rss_lang")
@@ -1990,8 +2058,24 @@ def page_jobs_exams():
         with st.spinner("Fetching latest updates..."):
             prompt = f"Provide latest notifications, exam dates, eligibility, and application details for: {category} in India. Include official portal references where relevant."
             ok, answer = gemini_generate(prompt, grounded=True)
-            if ok: render_answer(answer)
-            else: st.error(answer)
+            if ok:
+                render_answer(answer)
+            else:
+                # Key-independent fallback: show current Google News job/exam alerts
+                # instead of leaving the feature unusable when Gemini grounding is down.
+                st.warning("Gemini live grounding is unavailable, so current job/exam RSS alerts are shown instead.")
+                rss_query = f"India {category} government jobs recruitment exam notification"
+                rss_url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(rss_query) + "&hl=en-IN&gl=IN&ceid=IN:en"
+                items = fetch_rss(rss_url, limit=15)
+                if items:
+                    for item in items:
+                        st.markdown(
+                            f'<div class="card"><h4><a href="{html.escape(item["link"], quote=True)}" target="_blank">{html.escape(item["title"])}</a></h4>'
+                            f'<p style="font-size:12px;color:#64748b;">{html.escape(item["source"])} · {html.escape(item["pubDate"])}</p></div>',
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.error(answer)
 
 
 def page_music():
