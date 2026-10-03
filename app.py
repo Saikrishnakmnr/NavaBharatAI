@@ -1229,73 +1229,99 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
-    """Generate/edit Gemini 3.1 Flash Image with the documented GenerateContent REST API."""
+    """Generate/edit Gemini 3.1 Flash Image using Google's official GenAI SDK path."""
+    # Use the same Gemini API keys that already power the working text/AI features.
+    # Image-specific aliases are accepted only as additional fallbacks so a stale
+    # image-only secret cannot take precedence over a known-working Gemini key.
     keys = []
-    for name in ("GEMINI_IMAGE_API_KEY", "GEMINI_IMAGE_API_KEY_2"):
-        value = safe_secret(name)
+    for value in gemini_keys():
         if value and value not in keys:
             keys.append(value)
-    for value in gemini_keys():
+    for name in ("GEMINI_IMAGE_API_KEY", "GEMINI_IMAGE_API_KEY_2"):
+        value = safe_secret(name)
         if value and value not in keys:
             keys.append(value)
     if not keys:
         return None, None, "No Gemini API key is configured."
 
     model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
-    endpoint = f"https://generativelanguage.googleapis.com/v1/models/{urllib.parse.quote(model, safe='')}:generateContent"
     last_error = ""
 
     for key_index, api_key in enumerate(keys, start=1):
         try:
-            parts = [{"text": prompt}]
+            from google import genai
+            from google.genai import types
+            from PIL import Image
+
+            client = genai.Client(api_key=api_key)
+            contents = [prompt]
             if image_bytes:
-                parts.append({"inline_data": {
-                    "mime_type": mime_type or "image/png",
-                    "data": base64.b64encode(image_bytes).decode("utf-8"),
-                }})
-            payload = {
-                "contents": [{"parts": parts}],
-                "generationConfig": {
-                    "responseModalities": ["IMAGE"],
-                    "responseFormat": {"image": {
-                        "aspectRatio": aspect_ratio,
-                        "imageSize": image_size,
-                    }},
+                try:
+                    source_image = Image.open(io.BytesIO(image_bytes))
+                    contents.append(source_image)
+                except Exception as exc:
+                    last_error = f"Gemini image key {key_index}: uploaded image could not be read: {clean_error(exc)}"
+                    continue
+
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                response_format={
+                    "image": {
+                        "aspect_ratio": aspect_ratio,
+                        "image_size": image_size,
+                    }
                 },
-            }
-            response = requests.post(
-                endpoint,
-                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-                json=payload,
-                timeout=240,
             )
-            raw = response.text[:3000]
-            if not response.ok:
-                last_error = f"Gemini image key {key_index}: HTTP {response.status_code}: {raw}"
-                continue
-            body = response.json()
-            for candidate in body.get("candidates", []) or []:
-                content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
-                for part in content.get("parts", []) or []:
-                    if not isinstance(part, dict):
-                        continue
-                    inline = part.get("inlineData") or part.get("inline_data")
-                    if isinstance(inline, dict) and inline.get("data"):
-                        try:
-                            raw_image = base64.b64decode(inline["data"])
-                            if raw_image:
-                                return raw_image, inline.get("mimeType") or inline.get("mime_type") or "image/png", ""
-                        except Exception as exc:
-                            last_error = f"Gemini image key {key_index}: image decode failed: {clean_error(exc)}"
+
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+
+            # Official SDK exposes generated images through response.parts / as_image().
+            for part in getattr(response, "parts", []) or []:
+                if getattr(part, "inline_data", None) is not None:
+                    inline = part.inline_data
+                    data = getattr(inline, "data", None)
+                    if data:
+                        if isinstance(data, str):
+                            data = base64.b64decode(data)
+                        return bytes(data), getattr(inline, "mime_type", None) or "image/png", ""
+                try:
+                    image_obj = part.as_image()
+                    if image_obj is not None:
+                        out = io.BytesIO()
+                        image_obj.save(out, format="PNG")
+                        return out.getvalue(), "image/png", ""
+                except Exception:
+                    pass
+
+            # Some SDK versions expose the data only through candidates.
+            for candidate in getattr(response, "candidates", []) or []:
+                content = getattr(candidate, "content", None)
+                for part in getattr(content, "parts", []) or []:
+                    inline = getattr(part, "inline_data", None)
+                    if inline is not None:
+                        data = getattr(inline, "data", None)
+                        if data:
+                            if isinstance(data, str):
+                                data = base64.b64decode(data)
+                            return bytes(data), getattr(inline, "mime_type", None) or "image/png", ""
+
             last_error = f"Gemini image key {key_index}: successful request but no image data was returned."
         except Exception as exc:
             last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
+            continue
 
-    if any(x in last_error.upper() for x in ["401", "403", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "UNAUTHENTICATED", "API_KEY_SERVICE_BLOCKED", "INVALID_API_KEY"]):
+    if any(x in last_error.upper() for x in [
+        "401", "403", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "UNAUTHENTICATED",
+        "API_KEY_SERVICE_BLOCKED", "INVALID_API_KEY", "PERMISSION_DENIED",
+    ]):
         return None, None, (
-            "Gemini image request was rejected by Google. The app used the documented GenerateContent image endpoint "
-            "with x-goog-api-key and tried all configured Gemini/image keys. No unrelated fallback image is used. "
-            "Detail: " + last_error
+            "Gemini image generation was rejected by Google. The app now uses Google's official "
+            "GenAI SDK authentication with the existing Gemini API keys and the documented "
+            f"{model} image model. Detail: {last_error}"
         )
     return None, None, last_error or "Gemini did not return an image."
 
@@ -1902,6 +1928,117 @@ def _render_search_infographic(query: str, answer: str, sources):
     )
 
 
+
+def _search_image_font(size: int, bold: bool = False):
+    from PIL import ImageFont
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _wrap_image_text(draw, text, font, max_width):
+    words = re.sub(r"\\s+", " ", str(text or "")).strip().split(" ")
+    lines, current = [], ""
+    for word in words:
+        candidate = word if not current else current + " " + word
+        if draw.textbbox((0, 0), candidate, font=font)[2] <= max_width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _make_search_share_image(query: str, answer: str, kind: str = "notes", size=(1200, 1200)):
+    """Create a polished local PNG from the search answer; no image API is required."""
+    from PIL import Image, ImageDraw
+    W, H = size
+    img = Image.new("RGB", (W, H), (248, 250, 252))
+    draw = ImageDraw.Draw(img)
+    margin = max(48, W // 24)
+    title_font = _search_image_font(max(34, W // 28), True)
+    sub_font = _search_image_font(max(20, W // 58), False)
+    body_font = _search_image_font(max(22, W // 52), False)
+    small_font = _search_image_font(max(17, W // 70), False)
+
+    # Premium header band.
+    draw.rounded_rectangle((margin, margin, W-margin, margin+150), radius=28, fill=(15, 23, 42))
+    draw.text((margin+34, margin+28), "NavaBharat AI", font=title_font, fill=(255,255,255))
+    qlines = _wrap_image_text(draw, query, sub_font, W-2*margin-70)
+    draw.text((margin+36, margin+88), qlines[0][:100] if qlines else "Search summary", font=sub_font, fill=(203,213,225))
+
+    points = _search_content_lines(answer, 8)
+    if not points:
+        points = [answer[:900]]
+
+    if kind == "mindmap":
+        center_x, center_y = W//2, 300
+        center_w, center_h = min(460, W-2*margin), 120
+        draw.rounded_rectangle((center_x-center_w//2, center_y-center_h//2, center_x+center_w//2, center_y+center_h//2), radius=28, fill=(37,99,235))
+        center_lines = _wrap_image_text(draw, query, sub_font, center_w-40)[:2]
+        yy = center_y - (len(center_lines)*28)//2
+        for line in center_lines:
+            bb=draw.textbbox((0,0),line,font=sub_font); tw=bb[2]-bb[0]
+            draw.text((center_x-tw/2,yy),line,font=sub_font,fill=(255,255,255)); yy += 30
+        positions=[]
+        cols=2
+        card_w=(W-2*margin-70)//2
+        card_h=170
+        start_y=390
+        for i, point in enumerate(points[:6]):
+            col=i%cols; row=i//cols
+            x=margin+col*(card_w+70); y=start_y+row*(card_h+42)
+            positions.append((x+card_w//2,y))
+            draw.line((center_x, center_y+center_h//2, x+card_w//2, y), fill=(96,165,250), width=5)
+            draw.rounded_rectangle((x,y,x+card_w,y+card_h),radius=22,fill=(255,255,255),outline=(191,219,254),width=3)
+            draw.text((x+22,y+18),f"{i+1}",font=title_font,fill=(37,99,235))
+            lines=_wrap_image_text(draw,point,small_font,card_w-78)[:5]
+            ty=y+62
+            for line in lines:
+                draw.text((x+70,ty),line,font=small_font,fill=(30,41,59)); ty+=27
+    else:
+        y=235
+        draw.text((margin,y), "QUICK NOTES", font=title_font, fill=(15,23,42)); y+=75
+        for i, point in enumerate(points[:8],1):
+            box_h=115
+            if y+box_h > H-100: break
+            draw.rounded_rectangle((margin,y,W-margin,y+box_h),radius=22,fill=(255,255,255),outline=(226,232,240),width=2)
+            draw.ellipse((margin+22,y+25,margin+72,y+75),fill=(37,99,235))
+            draw.text((margin+38,y+32),str(i),font=small_font,fill=(255,255,255))
+            lines=_wrap_image_text(draw,point,small_font,W-2*margin-105)[:3]
+            ty=y+20
+            for line in lines:
+                draw.text((margin+92,ty),line,font=small_font,fill=(30,41,59)); ty+=28
+            y+=box_h+18
+
+    footer=f"Created from NavaBharat Googling • {kind.title()}"
+    draw.text((margin,H-55),footer,font=small_font,fill=(100,116,139))
+    import io
+    buf=io.BytesIO(); img.save(buf,format="PNG",optimize=True); return buf.getvalue()
+
+
+def _make_search_platform_image(query: str, answer: str, platform: str):
+    sizes={
+        "LinkedIn Post":(1200,627),
+        "Instagram Square":(1080,1080),
+        "Instagram Portrait":(1080,1350),
+        "Instagram / WhatsApp Story":(1080,1920),
+        "X / Twitter Post":(1600,900),
+        "YouTube Thumbnail":(1280,720),
+    }
+    kind="notes" if platform not in ("YouTube Thumbnail",) else "mindmap"
+    return _make_search_share_image(query,answer,kind=kind,size=sizes[platform])
+
 def page_general_search():
     """Fast Google-style search experience with AI answers and visual study tools."""
     st.markdown(
@@ -1967,6 +2104,9 @@ def page_general_search():
             st.session_state["nava_search_sources"] = sources
             st.session_state["nava_show_mindmap"] = False
             st.session_state["nava_show_infographic"] = False
+            st.session_state.pop("nava_mindmap_png", None)
+            st.session_state.pop("nava_notes_png", None)
+            st.session_state.pop("nava_post_png", None)
 
     answer = st.session_state.get("nava_search_answer", "")
     last_query = st.session_state.get("nava_search_last_query", "")
@@ -2005,6 +2145,31 @@ def page_general_search():
                     )
             else:
                 st.info("No live result cards were returned for this query. Use the Google button above for the full web result page.")
+
+        st.markdown("---")
+        st.markdown("### 🎨 Create Beautiful Posting Images")
+        st.caption("Turn the current quick answer into downloadable visual content. These images are generated locally, so this feature does not depend on the Gemini image API.")
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            if st.button("🗺️ Mind Map Image", key="nava_mindmap_image_btn", use_container_width=True):
+                st.session_state["nava_mindmap_png"] = _make_search_share_image(last_query, answer, "mindmap", (1600, 1000))
+            if st.session_state.get("nava_mindmap_png"):
+                st.image(st.session_state["nava_mindmap_png"], caption="NavaBharat Mind Map", use_container_width=True)
+                st.download_button("⬇️ Download Mind Map PNG", st.session_state["nava_mindmap_png"], "navabharat_mindmap.png", "image/png", key="nava_dl_mindmap_png", use_container_width=True)
+        with p2:
+            if st.button("📝 Notes Image", key="nava_notes_image_btn", use_container_width=True):
+                st.session_state["nava_notes_png"] = _make_search_share_image(last_query, answer, "notes", (1200, 1500))
+            if st.session_state.get("nava_notes_png"):
+                st.image(st.session_state["nava_notes_png"], caption="NavaBharat Quick Notes", use_container_width=True)
+                st.download_button("⬇️ Download Notes PNG", st.session_state["nava_notes_png"], "navabharat_notes.png", "image/png", key="nava_dl_notes_png", use_container_width=True)
+        with p3:
+            platform = st.selectbox("📱 Posting Format", ["LinkedIn Post", "Instagram Square", "Instagram Portrait", "Instagram / WhatsApp Story", "X / Twitter Post", "YouTube Thumbnail"], key="nava_post_format")
+            if st.button("✨ Create Post Image", key="nava_post_image_btn", use_container_width=True):
+                st.session_state["nava_post_png"] = _make_search_platform_image(last_query, answer, platform)
+                st.session_state["nava_post_platform"] = platform
+            if st.session_state.get("nava_post_png"):
+                st.image(st.session_state["nava_post_png"], caption=st.session_state.get("nava_post_platform", "Post Image"), use_container_width=True)
+                st.download_button("⬇️ Download Posting PNG", st.session_state["nava_post_png"], "navabharat_social_post.png", "image/png", key="nava_dl_post_png", use_container_width=True)
 
 
 def page_music_generator():
