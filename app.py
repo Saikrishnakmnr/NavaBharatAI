@@ -598,6 +598,34 @@ html, body, [class*="css"] {
     }
 }
 
+
+
+/* NAVABHARAT SEARCH VISUALS */
+.search-mindmap, .search-infographic {
+    margin: 16px 0; padding: 20px; border-radius: 24px;
+    background: rgba(255,255,255,.78); border: 1px solid rgba(99,102,241,.16);
+    box-shadow: 0 16px 45px rgba(30,41,59,.10);
+}
+.search-map-center { max-width: 460px; margin: 0 auto 18px; padding: 18px; text-align: center;
+    border-radius: 20px; background: linear-gradient(135deg,#eef2ff,#fdf2f8);
+    border: 2px solid rgba(99,102,241,.20); font-size: 18px; }
+.search-map-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 12px; }
+.search-map-node { display: flex; gap: 10px; align-items: flex-start; padding: 14px; border-radius: 16px;
+    background: #ffffff; border: 1px solid rgba(99,102,241,.14); }
+.search-map-num { min-width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: #eef2ff; font-weight: 800; }
+.search-info-head { display:flex; gap:14px; align-items:center; margin-bottom:16px; }
+.search-info-head h2 { margin:0; font-size:24px; } .search-info-head p { margin:4px 0 0; opacity:.68; }
+.search-info-icon { font-size:34px; }
+.search-info-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+.search-info-card { display:flex; gap:12px; padding:15px; border-radius:16px; background:#fff; border:1px solid rgba(14,165,233,.16); }
+.search-info-card b { min-width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:#e0f2fe; }
+.search-info-card span { line-height:1.5; } .search-info-sources { margin-top:18px; }
+.search-source { display:flex; flex-direction:column; gap:3px; padding:10px 0; text-decoration:none; border-bottom:1px solid rgba(15,23,42,.08); }
+.search-source strong { color:#2563eb; } .search-source span { color:#64748b; font-size:12px; }
+@media (max-width: 700px) { .search-mindmap, .search-infographic { padding: 13px; }
+    .search-map-grid, .search-info-grid { grid-template-columns: 1fr; } }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1815,12 +1843,203 @@ User lyrics or song topic:
             last_error = f"Gemini music key {key_index}: {clean_error(exc)}"
     return None, None, None, last_error or "Gemini Lyria music generation failed."
 
+def _search_content_lines(text: str, limit: int = 7):
+    """Turn an answer into short readable points for the visual search tools."""
+    if not text:
+        return []
+    cleaned = re.sub(r"\s+", " ", str(text)).strip()
+    chunks = [c.strip(" •-*\t\n") for c in re.split(r"(?<=[.!?])\s+|\n+", cleaned) if c.strip()]
+    points = []
+    for chunk in chunks:
+        if len(chunk) < 18:
+            continue
+        points.append(chunk[:260] + ("…" if len(chunk) > 260 else ""))
+        if len(points) >= limit:
+            break
+    return points
+
+
+def _render_search_mindmap(query: str, answer: str):
+    points = _search_content_lines(answer, 6)
+    if not points:
+        st.info("Search for a topic first, then create the mind map.")
+        return
+    center = html.escape(query[:90])
+    nodes = "".join(
+        f'<div class="search-map-node"><span class="search-map-num">{i}</span><div>{html.escape(point)}</div></div>'
+        for i, point in enumerate(points, 1)
+    )
+    st.markdown(
+        f'''<div class="search-mindmap">
+            <div class="search-map-center">🔎<br><strong>{center}</strong></div>
+            <div class="search-map-grid">{nodes}</div>
+        </div>''',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_search_infographic(query: str, answer: str, sources):
+    points = _search_content_lines(answer, 6)
+    title = html.escape(query[:120])
+    source_cards = "".join(
+        f'<a class="search-source" href="{html.escape(item.get("link", ""), quote=True)}" target="_blank">'
+        f'<strong>{html.escape(item.get("title", "Untitled"))}</strong>'
+        f'<span>{html.escape(item.get("source", "Google News"))}</span></a>'
+        for item in (sources or [])[:5]
+        if item.get("link")
+    )
+    point_cards = "".join(
+        f'<div class="search-info-card"><b>{i}</b><span>{html.escape(point)}</span></div>'
+        for i, point in enumerate(points, 1)
+    )
+    st.markdown(
+        f'''<div class="search-infographic">
+            <div class="search-info-head"><div class="search-info-icon">🔎</div><div><h2>{title}</h2><p>NavaBharat Search • quick visual summary</p></div></div>
+            <div class="search-info-grid">{point_cards or '<div class="search-info-card"><span>No summary points available.</span></div>'}</div>
+            {f'<div class="search-info-sources"><h4>Sources</h4>{source_cards}</div>' if source_cards else ''}
+        </div>''',
+        unsafe_allow_html=True,
+    )
+
+
+def page_general_search():
+    """Fast Google-style search experience with AI answers and visual study tools."""
+    st.markdown(
+        '<div class="hero"><h1>🔎 NavaBharat Googling</h1>'
+        '<p>Search the web, get a quick AI answer, open Google results, and turn the result into a mind map or infographic.</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    query = st.text_input(
+        "🔎 Search anything",
+        placeholder="Ask anything: people, places, technology, study topics, products, news, how-to questions...",
+        key="nava_search_query",
+    )
+    c1, c2, c3 = st.columns([1.4, 1, 1])
+    with c1:
+        search_clicked = st.button("🔍 Search & Answer", key="nava_search_btn", use_container_width=True)
+    with c2:
+        if query.strip():
+            google_url = "https://www.google.com/search?q=" + urllib.parse.quote_plus(query.strip())
+            st.link_button("🌐 Google", google_url, use_container_width=True)
+        else:
+            st.button("🌐 Google", key="nava_google_disabled", disabled=True, use_container_width=True)
+    with c3:
+        st.caption("⚡ Quick answers • 🗺️ Mind maps • 📊 Infographics")
+
+    if search_clicked:
+        if not query.strip():
+            st.warning("Type something to search first.")
+            return
+        with st.spinner("🔎 Searching and preparing a quick answer..."):
+            rss_url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(query.strip()) + "&hl=en-IN&gl=IN&ceid=IN:en"
+            sources = fetch_rss(rss_url, limit=8)
+            answer = ""
+            try:
+                ok_grounded, grounded_answer = gemini_generate(query.strip(), grounded=True, retries=0)
+                if ok_grounded:
+                    answer = grounded_answer
+            except Exception:
+                pass
+
+            if not answer:
+                source_text = "\n".join(
+                    f"- {item.get('title','')} ({item.get('source','Google News')})"
+                    for item in sources[:8]
+                )
+                prompt = (
+                    "Answer the user's search query quickly and clearly. Give a concise direct answer first, "
+                    "then useful key points. If live search results are supplied, use them as current evidence and "
+                    "do not invent details that conflict with them. If no live results are supplied, answer from "
+                    "your general knowledge and avoid claiming that you performed a live web search.\n\n"
+                    f"User query: {query.strip()}\n\n"
+                    f"Live Google News results (may be empty):\n{source_text or '(none)'}"
+                )
+                ok_ai, ai_answer = gemini_generate(prompt, grounded=False, retries=0)
+                if ok_ai:
+                    answer = ai_answer
+
+            if not answer:
+                answer = "No AI summary is available right now. The live search results are shown below."
+
+            st.session_state["nava_search_last_query"] = query.strip()
+            st.session_state["nava_search_answer"] = answer
+            st.session_state["nava_search_sources"] = sources
+            st.session_state["nava_show_mindmap"] = False
+            st.session_state["nava_show_infographic"] = False
+
+    answer = st.session_state.get("nava_search_answer", "")
+    last_query = st.session_state.get("nava_search_last_query", "")
+    sources = st.session_state.get("nava_search_sources", [])
+
+    if answer and last_query:
+        st.markdown("### ⚡ Quick Answer")
+        render_answer(answer)
+
+        tab1, tab2, tab3 = st.tabs(["🗺️ Mind Map", "📊 Infographic", "🌐 Search Results"])
+        with tab1:
+            st.caption("Turn the current search answer into a clean visual mind map.")
+            if st.button("🗺️ Create Mind Map", key="nava_mindmap_btn", use_container_width=True):
+                st.session_state["nava_show_mindmap"] = True
+            if st.session_state.get("nava_show_mindmap"):
+                _render_search_mindmap(last_query, answer)
+
+        with tab2:
+            st.caption("Turn the current search answer into a shareable infographic-style summary.")
+            if st.button("📊 Create Infographic", key="nava_infographic_btn", use_container_width=True):
+                st.session_state["nava_show_infographic"] = True
+            if st.session_state.get("nava_show_infographic"):
+                _render_search_infographic(last_query, answer, sources)
+
+        with tab3:
+            if sources:
+                for item in sources:
+                    title = html.escape(item.get("title", "Search result"))
+                    link = html.escape(item.get("link", ""), quote=True)
+                    source_name = html.escape(item.get("source", "Google News"))
+                    pub_date = html.escape(item.get("pubDate", ""))
+                    st.markdown(
+                        f'<div class="card"><h4><a href="{link}" target="_blank" style="text-decoration:none;color:#2563eb;">{title}</a></h4>'
+                        f'<p style="font-size:12px;color:#64748b;">{source_name} · {pub_date}</p></div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No live result cards were returned for this query. Use the Google button above for the full web result page.")
+
+
 def page_music_generator():
     st.markdown(
         '<div class="neon-hero"><h1>🎼 AI Music & Song Generator</h1>'
         '<p>Real AI-generated songs with vocals and instruments. Gemini Lyria 3.5 is primary; ACE-Step is the backup service.</p></div>',
         unsafe_allow_html=True,
     )
+
+    # IMPORTANT: generate/apply lyrics BEFORE the mgen_lyrics widget is instantiated.
+    # Streamlit raises StreamlitWidgetAlreadyInstantiatedError if code tries to mutate
+    # a widget's session-state key after that widget has already been created in a run.
+    st.markdown("### ✍️ NavaBharat Lyrics")
+    lyrics_topic = st.text_input(
+        "Song topic / idea",
+        placeholder="Example: a Telugu motivational song about never giving up",
+        key="navabharat_lyrics_topic",
+    )
+    if st.button("✍️ Generate NavaBharat Lyrics", key="navabharat_lyrics_btn"):
+        if not lyrics_topic.strip():
+            st.warning("Enter a song topic or idea first.")
+        else:
+            with st.spinner("Writing original lyrics..."):
+                ok, generated = gemini_generate(
+                    f"Write original song lyrics for: {lyrics_topic.strip()}. "
+                    "Use verses, a memorable chorus, and a bridge where suitable. "
+                    "Return only lyrics with section labels. Do not imitate a named artist."
+                )
+                if ok:
+                    st.session_state["mgen_lyrics"] = generated
+                    st.session_state["mgen_lyrics_generated"] = generated
+                    st.success("Lyrics generated. They are now loaded into the song lyrics box below.")
+                else:
+                    st.error(generated)
+
     c1, c2 = st.columns([2, 1])
     with c1:
         lyrics_input = st.text_area(
@@ -1851,29 +2070,6 @@ def page_music_generator():
             key="mgen_vocal",
         )
 
-    st.markdown("### ✍️ NavaBharat Lyrics")
-    lyrics_topic = st.text_input(
-        "Song topic / idea",
-        placeholder="Example: a Telugu motivational song about never giving up",
-        key="navabharat_lyrics_topic",
-    )
-    if st.button("✍️ Generate NavaBharat Lyrics", key="navabharat_lyrics_btn"):
-        if not lyrics_topic.strip():
-            st.warning("Enter a song topic or idea first.")
-        else:
-            with st.spinner("Writing original lyrics..."):
-                ok, generated = gemini_generate(
-                    f"Write original song lyrics for: {lyrics_topic.strip()}. "
-                    "Use verses, a memorable chorus, and a bridge where suitable. "
-                    "Return only lyrics with section labels. Do not imitate a named artist."
-                )
-                if ok:
-                    st.session_state["mgen_lyrics_generated"] = generated
-                    st.session_state["mgen_lyrics"] = generated
-                    st.success("Lyrics generated and placed into the song lyrics box.")
-                else:
-                    st.error(generated)
-
     st.caption("Primary: Google Gemini Lyria 3.5 • Backup: ACE-Step cloud. Your second Gemini key is used automatically if the first key fails.")
 
     if st.button("🎼 Generate Real AI Song", key="mgen_btn"):
@@ -1887,8 +2083,6 @@ def page_music_generator():
             fmt = None
             song_text = ""
             primary_error = ""
-
-            # PRIMARY: Gemini Lyria 3.5. This path does not depend on ACE-Step.
             try:
                 audio_data, mime_type, fmt, song_text = generate_song_with_gemini_lyria(
                     duration_sec, genre_style, lyrics_input, vocal_type
@@ -1898,15 +2092,14 @@ def page_music_generator():
             except Exception as exc:
                 primary_error = clean_error(exc)
 
-            # SECONDARY: ACE-Step only if Gemini music generation fails.
             if not audio_data:
-                st.warning("Gemini Lyria did not return audio. Trying ACE-Step backup...")
                 try:
                     audio_data, mime_type, fmt, ace_error = generate_song_with_acestep(
                         duration_sec, genre_style, lyrics_input, vocal_type
                     )
                     if audio_data:
                         st.success("✅ Song generated with ACE-Step backup.")
+                        primary_error = ""
                     else:
                         primary_error = f"Gemini: {primary_error or 'no audio returned'} | ACE-Step: {ace_error}"
                 except Exception as exc:
@@ -1928,6 +2121,7 @@ def page_music_generator():
             if song_text:
                 st.markdown("### 🎤 Generated Lyrics / Music Notes")
                 render_answer(song_text)
+
 
 def page_science():
     st.markdown('<div class="hero"><h1>🔬 AI Science Solver</h1><p>Specialized solver for Physics, Chemistry, Biology, Mathematics, and Engineering topics.</p></div>', unsafe_allow_html=True)
@@ -2299,6 +2493,7 @@ def page_about():
 # ============================================================
 
 NAVIGATION = {
+    "🔎 NavaBharat Googling": page_general_search,
     "🏠 Home": page_home,
     "🧠 Solve Anything": page_solve,
     "🎨 Free AI Image Generator": page_image_generator,
