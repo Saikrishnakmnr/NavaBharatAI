@@ -23,39 +23,72 @@ import streamlit.components.v1 as components
 
 def inject_tracking_scripts():
     """
-    Patches Streamlit's underlying static index.html file dynamically at startup.
-    Reads GA Measurement ID and Monetag Zone ID from st.secrets with fallbacks.
+    Best-effort server-side patch for environments where Streamlit's packaged
+    index.html is writable. Also injects verification meta tags when supplied.
+    For hosted Streamlit deployments, the deployer's real root HTML/domain may
+    still be required by third-party verification crawlers.
     """
     try:
-        ga_id = st.secrets.get("GA_MEASUREMENT_ID", "G-39MNX1V7XK")
-        monetag_id = st.secrets.get("MONETAG_ZONE_ID", "11941649")
-        
+        def _early_secret(name, default=""):
+            try:
+                value = st.secrets.get(name)
+                if value:
+                    return str(value).strip()
+            except Exception:
+                pass
+            return os.getenv(name, default).strip()
+        ga_id = _early_secret("GA_MEASUREMENT_ID", "G-39MNX1V7XK")
+        monetag_id = _early_secret("MONETAG_ZONE_ID", "11941649")
+        google_verification = _early_secret("GOOGLE_SITE_VERIFICATION")
+        monetag_verification = _early_secret("MONETAG_VERIFICATION_META")
+
         streamlit_path = Path(st.__path__[0])
         index_path = streamlit_path / "static" / "index.html"
-        
-        if index_path.exists():
-            html_text = index_path.read_text(encoding="utf-8")
-            
-            if ga_id not in html_text:
-                head_injection = f"""
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id={ga_id}"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){{dataLayer.push(arguments);}}
-      gtag('js', new Date());
+        if not index_path.exists():
+            return
 
-      gtag('config', '{ga_id}');
-    </script>
+        html_text = index_path.read_text(encoding="utf-8")
 
-    <!-- Monetag Script (Zone ID: {monetag_id}) -->
-    <script src="https://3nbf4.com/act/files/tag.min.js?z={monetag_id}" data-cfasync="false" async></script>
-    """
-                updated_html = html_text.replace("<head>", f"<head>\n{head_injection}")
-                index_path.write_text(updated_html, encoding="utf-8")
+        head_parts = []
+        if ga_id and ga_id not in html_text:
+            head_parts.append(f"""
+<!-- NavaBharat AI: GA4 -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={html.escape(ga_id)}"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){{dataLayer.push(arguments);}}
+gtag('js', new Date());
+gtag('config', '{html.escape(ga_id)}', {{
+  send_page_view: true,
+  transport_type: 'beacon'
+}});
+</script>
+""")
+
+        if monetag_id and monetag_id not in html_text:
+            head_parts.append(f"""
+<!-- NavaBharat AI: Monetag zone -->
+<script src="https://3nbf4.com/act/files/tag.min.js?z={html.escape(monetag_id)}" data-cfasync="false" async></script>
+""")
+
+        if google_verification and "google-site-verification" not in html_text:
+            head_parts.append(
+                f'<meta name="google-site-verification" content="{html.escape(google_verification, quote=True)}">'
+            )
+
+        if monetag_verification and "monetag-verification" not in html_text:
+            # Store the exact meta content supplied by Monetag.
+            head_parts.append(
+                f'<meta name="monetag-verification" content="{html.escape(monetag_verification, quote=True)}">'
+            )
+
+        if head_parts and "<head>" in html_text:
+            updated_html = html_text.replace("<head>", "<head>\n" + "\n".join(head_parts), 1)
+            index_path.write_text(updated_html, encoding="utf-8")
     except Exception:
-        # Fallback if filesystem is read-only
+        # Read-only/hosted Streamlit packages should not break the app.
         pass
+
 
 inject_tracking_scripts()
 
@@ -67,7 +100,7 @@ inject_tracking_scripts()
 # ============================================================
 
 APP_NAME = "NavaBharat AI"
-APP_VERSION = "6.5.0"
+APP_VERSION = "7.0.0"
 CREATOR = "Racharla Saikrishna"
 BRAND = "RacharlaGPT"
 TAGLINE = "POWERED BY RACHARLAGPT"
@@ -923,7 +956,10 @@ def social_links(text: str, url: str = CHANNEL_URL):
 
 
 def go(page: str):
+    # Keep both the application route and the radio widget state in sync.
+    # Without this, Streamlit can restore the previous radio selection on rerun.
     st.session_state["nav"] = page
+    st.session_state["nav_radio"] = page
     st.rerun()
 
 
@@ -954,6 +990,11 @@ def page_home():
         st.markdown('<div class="card home-card-4"><h3>📡 Live Information</h3><p>Get grounded search answers and latest live Google News RSS feeds across Indian languages.</p></div>', unsafe_allow_html=True)
         if st.button("📡 Open Live Info", key="home_live"): go("📡 Live Information")
 
+        st.markdown('<div class="card home-card-6"><h3>🗞️ Daily Current Affairs</h3><p>Read today&apos;s latest headlines in Telugu, English, Hindi and other Indian languages, then generate a quiz.</p></div>', unsafe_allow_html=True)
+        if st.button("🗞️ Open Daily Current Affairs", key="home_current_affairs"): go("🗞️ Daily Current Affairs")
+        if st.link_button("▶️ Open RacharlaGPT YouTube", CHANNEL_URL, type="secondary"):
+            pass
+
 
 def page_solve():
     st.markdown('<div class="hero"><h1>🧠 Solve Anything</h1><p>Get comprehensive, step-by-step solutions for any topic or upload a photo of your problem.</p></div>', unsafe_allow_html=True)
@@ -977,146 +1018,419 @@ def page_solve():
                     st.error(answer)
 
 
+def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
+                          aspect_ratio: str = "1:1", image_size: str = "2K"):
+    """
+    Uses Gemini's native image model. Supports both text-to-image and
+    text+image editing. Returns (bytes, mime_type) or (None, None).
+    """
+    client = get_gemini_client()
+    if not client:
+        return None, None
+
+    try:
+        import base64
+        model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+
+        if image_bytes:
+            inputs = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image",
+                    "data": base64.b64encode(image_bytes).decode("utf-8"),
+                    "mime_type": mime_type,
+                },
+            ]
+        else:
+            inputs = prompt
+
+        interaction = client.interactions.create(
+            model=model,
+            input=inputs,
+            response_format={
+                "type": "image",
+                "mime_type": "image/png",
+                "aspect_ratio": aspect_ratio,
+                "image_size": image_size,
+            },
+        )
+        output_image = getattr(interaction, "output_image", None)
+        if output_image and getattr(output_image, "data", None):
+            return base64.b64decode(output_image.data), getattr(output_image, "mime_type", "image/png")
+    except Exception:
+        return None, None
+
+    return None, None
+
+
+def sharpen_image_bytes(data: bytes) -> bytes:
+    """Light lossless-ish post-processing to reduce soft/blurred-looking output."""
+    try:
+        from PIL import Image, ImageFilter
+        src = Image.open(io.BytesIO(data)).convert("RGB")
+        # Upscale small outputs before sharpening; never enlarge aggressively.
+        if min(src.size) < 900:
+            scale = 900 / min(src.size)
+            src = src.resize((int(src.width * scale), int(src.height * scale)), Image.Resampling.LANCZOS)
+        src = src.filter(ImageFilter.UnsharpMask(radius=1.4, percent=145, threshold=3))
+        out = io.BytesIO()
+        src.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception:
+        return data
+
+
+def fallback_pollinations_image(prompt: str, width: int, height: int):
+    encoded = urllib.parse.quote_plus(prompt)
+    seed = int(time.time() * 1000) % 1000000
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width={width}&height={height}&seed={seed}&nologo=true&model=flux"
+        f"&enhance=true&safe=true"
+    )
+    response = requests.get(
+        url,
+        headers={"User-Agent": "NavaBharat-AI/7.0"},
+        timeout=60,
+    )
+    if response.status_code != 200 or not response.content:
+        return None
+    return response.content
+
+
 def page_image_generator():
-    st.markdown('<div class="hero"><h1>🎨 Free AI Image Studio</h1><p>Create sharp, realistic AI photos or transform uploaded user images with Flux AI power.</p></div>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["✨ Text to Sharp AI Image", "🖼️ Upload Image & AI Re-imagine"])
-    
+    st.markdown(
+        '<div class="hero"><h1>🎨 Free AI Image Studio</h1>'
+        '<p>Native Gemini image generation/editing with a sharpened fallback renderer.</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    tab1, tab2 = st.tabs(["✨ Text to AI Image", "🖼️ Upload Image & AI Re-imagine"])
+
     with tab1:
         col1, col2 = st.columns([2, 1])
         with col1:
-            prompt = st.text_area("Image Description / Prompt", height=140, placeholder="e.g. A crisp detailed photo of a man eating food while watching TV in a living room, sharp focus, 8k resolution...", key="img_prompt")
+            prompt = st.text_area(
+                "Image Description / Prompt",
+                height=150,
+                placeholder="Describe exactly what you want. Example: a sharp realistic portrait, natural skin texture, clear eyes, detailed hair, clean background, no blur...",
+                key="img_prompt",
+            )
         with col2:
-            style = st.selectbox("Art Style", ["Photorealistic", "Digital Art", "Anime / Manga", "Cinematic", "3D Render", "Fantasy Art", "Cyberpunk"], key="img_style")
-            aspect = st.selectbox("Aspect Ratio", ["1:1 (Square)", "16:9 (Landscape)", "9:16 (Portrait / Reel)"], key="img_aspect")
+            style = st.selectbox(
+                "Art Style",
+                ["Photorealistic", "Digital Art", "Anime / Manga", "Cinematic", "3D Render", "Fantasy Art", "Cyberpunk"],
+                key="img_style",
+            )
+            aspect = st.selectbox(
+                "Aspect Ratio",
+                ["1:1 (Square)", "16:9 (Landscape)", "9:16 (Portrait / Reel)"],
+                key="img_aspect",
+            )
+            size = st.selectbox("Image Quality", ["1K", "2K"], index=1, key="img_size")
 
         if st.button("🎨 Generate Sharp AI Image", key="gen_img_btn"):
             if not prompt.strip():
                 st.warning("Please enter an image description.")
             else:
-                with st.spinner("Generating crisp AI Image with Flux model..."):
-                    try:
-                        dims = {"1:1 (Square)": (1024, 1024), "16:9 (Landscape)": (1280, 720), "9:16 (Portrait / Reel)": (720, 1280)}
-                        width, height = dims.get(aspect, (1024, 1024))
-                        
-                        style_text = "sharp focus photorealistic photography, 8k resolution, crisp face and body features, clear subject detail" if style == "Photorealistic" else f"{style} style, crisp detail, sharp focus, high quality"
-                        full_prompt = f"{prompt.strip()}, {style_text}"
-                        encoded_prompt = urllib.parse.quote_plus(full_prompt)
-                        seed = int(time.time() * 1000) % 1000000
-                        
-                        img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&nologo=true&model=flux"
-                        response = requests.get(img_url, timeout=35)
-                        
-                        if response.status_code == 200:
-                            img_bytes = response.content
-                            st.image(img_bytes, caption=f"Generated Image: {prompt[:80]}", use_container_width=True)
-                            st.download_button("⬇️ Download Image (PNG)", data=img_bytes, file_name="navabharat_ai_image.png", mime="image/png", key="dl_gen_img")
-                            st.markdown("### 📤 Share Creation")
-                            social_links(f"Check out this AI image on NavaBharat AI: {prompt[:80]}", CHANNEL_URL)
-                        else:
-                            st.error("Image generation service busy. Please try again.")
-                    except Exception as exc:
-                        st.error(f"Image generation error: {clean_error(exc)}")
+                aspect_ratio = {"1:1 (Square)": "1:1", "16:9 (Landscape)": "16:9", "9:16 (Portrait / Reel)": "9:16"}[aspect]
+                width, height = {"1:1 (Square)": (1024, 1024), "16:9 (Landscape)": (1536, 864), "9:16 (Portrait / Reel)": (864, 1536)}[aspect]
+                quality_prompt = (
+                    f"{prompt.strip()}. Style: {style}. "
+                    "Very sharp focus, crisp edges, realistic fine details, clear eyes and facial features, "
+                    "natural skin texture, well-defined objects, high detail, professional lighting. "
+                    "Avoid blur, haze, smeared details, distorted hands, duplicate objects, warped faces, "
+                    "soft focus, low resolution, text artifacts."
+                )
+                with st.spinner("Generating high-quality image..."):
+                    img_bytes, mime = generate_gemini_image(
+                        quality_prompt,
+                        aspect_ratio=aspect_ratio,
+                        image_size=size,
+                    )
+                    if img_bytes is None:
+                        try:
+                            img_bytes = fallback_pollinations_image(quality_prompt, width, height)
+                            mime = "image/png"
+                        except Exception as exc:
+                            st.error(f"Image generation failed: {clean_error(exc)}")
+                            img_bytes = None
+
+                    if img_bytes:
+                        img_bytes = sharpen_image_bytes(img_bytes)
+                        st.image(img_bytes, caption=f"Generated {style} image", use_container_width=True)
+                        st.download_button(
+                            "⬇️ Download Image",
+                            data=img_bytes,
+                            file_name="navabharat_ai_image.png",
+                            mime="image/png",
+                            key="dl_gen_img",
+                        )
+                        st.markdown("### 📤 Share Creation")
+                        social_links(f"AI image created on NavaBharat AI: {prompt[:80]}", CHANNEL_URL)
+                    else:
+                        st.error("No image was returned. Check GEMINI_API_KEY/GEMINI_IMAGE_MODEL and try again.")
 
     with tab2:
         st.markdown("### 📤 Upload Your Image for AI Transformation")
-        user_img = st.file_uploader("Upload Image to Transform", type=["png", "jpg", "jpeg", "webp"], key="user_img_uploader")
-        user_mod_prompt = st.text_input("How should AI transform your uploaded image?", placeholder="e.g. Change into a futuristic superhero, or change background to a beach sunset...", key="user_mod_prompt")
-        
-        if st.button("⚡ Transform Uploaded Image into AI Image", key="transform_img_btn"):
+        user_img = st.file_uploader(
+            "Upload Image to Transform",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="user_img_uploader",
+        )
+        user_mod_prompt = st.text_input(
+            "How should AI transform your uploaded image?",
+            placeholder="Example: keep the person and face recognizable, change the background to a beach at sunset, cinematic lighting...",
+            key="user_mod_prompt",
+        )
+
+        if st.button("⚡ Transform Uploaded Image", key="transform_img_btn"):
             if not user_img:
                 st.warning("Please upload an image file first.")
+            elif not user_mod_prompt.strip():
+                st.warning("Please describe the transformation.")
             else:
-                with st.spinner("Analyzing uploaded image & generating AI transformation..."):
-                    try:
-                        image_bytes = user_img.getvalue()
-                        ai_description = gemini_analyze_image(image_bytes, user_mod_prompt)
-                        
-                        if not ai_description:
-                            ai_description = f"A photo transformation based on user request: {user_mod_prompt}, sharp focus, highly detailed, 8k resolution"
-                        
-                        encoded_prompt = urllib.parse.quote_plus(f"{ai_description}, sharp focus, high definition, clear features")
-                        seed = int(time.time() * 1000) % 1000000
-                        
-                        img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&nologo=true&model=flux"
-                        response = requests.get(img_url, timeout=35)
-                        
-                        if response.status_code == 200:
-                            transformed_bytes = response.content
-                            st.image(transformed_bytes, caption="AI Transformed Image Creation", use_container_width=True)
-                            st.download_button("⬇️ Download Transformed Image", data=transformed_bytes, file_name="navabharat_transformed_ai.png", mime="image/png", key="dl_transformed_img")
-                        else:
-                            st.error("Transformation service busy. Please try again.")
-                    except Exception as exc:
-                        st.error(f"Transformation failed: {clean_error(exc)}")
+                with st.spinner("Editing your image with Gemini image generation..."):
+                    image_bytes = user_img.getvalue()
+                    mime_in = user_img.type or "image/png"
+                    edit_prompt = (
+                        f"Edit the supplied image according to this request: {user_mod_prompt.strip()}. "
+                        "Preserve the identity, pose, anatomy and important subject details unless the user explicitly asks to change them. "
+                        "Create a sharp, high-resolution result with crisp edges, clear facial details, natural skin texture, "
+                        "accurate hands, coherent lighting and no blur, haze, smeared features or distorted anatomy."
+                    )
+                    transformed, out_mime = generate_gemini_image(
+                        edit_prompt,
+                        image_bytes=image_bytes,
+                        mime_type=mime_in,
+                        aspect_ratio="1:1",
+                        image_size="2K",
+                    )
+                    if transformed:
+                        transformed = sharpen_image_bytes(transformed)
+                        st.image(transformed, caption="AI-transformed image", use_container_width=True)
+                        st.download_button(
+                            "⬇️ Download Transformed Image",
+                            data=transformed,
+                            file_name="navabharat_transformed_ai.png",
+                            mime="image/png",
+                            key="dl_transformed_img",
+                        )
+                    else:
+                        st.error(
+                            "Gemini image editing did not return an image. "
+                            "Set GEMINI_API_KEY and, if needed, GEMINI_IMAGE_MODEL=gemini-3.1-flash-image."
+                        )
+
+
+def generate_song_track(duration_sec: int, style: str, lyrics: str, vocal_type: str):
+    """
+    Creates a complete procedural song-like track: stereo accompaniment,
+    chords, bass, percussion and a vowel/formant melody derived from lyrics.
+    This is intentionally offline and does not require a third-party music API.
+    """
+    sample_rate = 22050
+    total = int(sample_rate * duration_sec)
+
+    if "EDM" in style or "Synthwave" in style:
+        scale = [110.0, 130.81, 146.83, 164.81, 196.0, 220.0, 246.94]
+        bpm = 120
+    elif "Hip Hop" in style or "Rap" in style:
+        scale = [110.0, 130.81, 146.83, 164.81, 196.0]
+        bpm = 92
+    elif "Devotional" in style or "Classical" in style:
+        scale = [261.63, 293.66, 329.63, 392.0, 440.0, 493.88, 523.25]
+        bpm = 76
+    elif "Folk" in style or "Bollywood" in style:
+        scale = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25]
+        bpm = 102
+    else:
+        scale = [220.0, 261.63, 293.66, 329.63, 392.0]
+        bpm = 84
+
+    # Turn lyric words into syllable-ish vowel targets for a melodic vocal synth.
+    words = re.findall(r"[A-Za-zÀ-ÿ\u0900-\u0dff]+", lyrics) or ["NavaBharat", "AI"]
+    vowels = []
+    for word in words:
+        chars = [c for c in word.lower() if c in "aeiou"]
+        vowels.extend(chars or ["a"])
+    if not vowels:
+        vowels = ["a", "e", "i", "o", "u"]
+
+    def formant_vowel(t, freq, vowel, attack=0.03, release=0.12):
+        # Simple vowel-like harmonic spectrum; intentionally musical, not speech.
+        formants = {
+            "a": (800, 1150),
+            "e": (500, 1900),
+            "i": (300, 2200),
+            "o": (500, 1000),
+            "u": (350, 850),
+        }
+        f1, f2 = formants.get(vowel, (600, 1200))
+        base = math.sin(2 * math.pi * freq * t)
+        h2 = 0.45 * math.sin(2 * math.pi * 2 * freq * t)
+        h3 = 0.20 * math.sin(2 * math.pi * 3 * freq * t)
+        formant1 = 0.08 * math.sin(2 * math.pi * f1 * t)
+        formant2 = 0.05 * math.sin(2 * math.pi * f2 * t)
+        return base + h2 + h3 + formant1 + formant2
+
+    beat_sec = 60.0 / bpm
+    note_sec = beat_sec / 2
+    chord_len = int(beat_sec * 4 * sample_rate)
+    note_len = max(1, int(note_sec * sample_rate))
+    lyric_index = 0
+
+    frames = bytearray()
+    for i in range(total):
+        t = i / sample_rate
+        note_pos = i // note_len
+        beat_pos = (i % int(beat_sec * sample_rate)) / sample_rate
+
+        # I-V-vi-IV-like cycle, adapted to the chosen scale.
+        root_idx = (note_pos // 8 * 2) % len(scale)
+        root = scale[root_idx]
+        third = scale[(root_idx + 2) % len(scale)]
+        fifth = scale[(root_idx + 4) % len(scale)]
+        chord = (
+            0.12 * math.sin(2 * math.pi * root * t)
+            + 0.08 * math.sin(2 * math.pi * third * t)
+            + 0.07 * math.sin(2 * math.pi * fifth * t)
+        )
+
+        bass = 0.16 * math.sin(2 * math.pi * (root / 2) * t)
+
+        # Lead melody.
+        melody_freq = scale[(note_pos + 1) % len(scale)]
+        local = (i % note_len) / note_len
+        env = min(1.0, local / 0.08) * max(0.0, 1.0 - max(0.0, (local - 0.72) / 0.28))
+        lead = 0.26 * math.sin(2 * math.pi * melody_freq * t) * env
+
+        # Vowel/formant "vocal" layer follows lyric vowels.
+        if note_pos % 2 == 0:
+            lyric_index = (note_pos // 2) % len(vowels)
+        vowel = vowels[lyric_index]
+        vocal = 0.0
+        if vocal_type != "High Tempo Instrumental Beats":
+            vocal_freq = melody_freq * (1.0 if "Solo" in vocal_type else 1.0)
+            vocal = 0.18 * formant_vowel(t, vocal_freq, vowel) * env
+
+        # Kick/snare/hi-hat layers.
+        kick = 0.0
+        if beat_pos < 0.12:
+            kick = 0.34 * math.exp(-28 * beat_pos) * math.sin(2 * math.pi * (95 - 45 * beat_pos) * t)
+        snare = 0.0
+        half = beat_sec / 2
+        if half - 0.025 < beat_pos < half + 0.025:
+            snare = 0.10 * math.sin(2 * math.pi * 180 * t) * math.exp(-45 * abs(beat_pos - half))
+        hat = 0.025 * math.sin(2 * math.pi * 5000 * t) * math.exp(-35 * (beat_pos % (beat_sec / 4)))
+
+        left = chord + bass + lead + vocal + kick + snare + hat
+        right = chord * 0.92 + bass + lead * 0.96 + vocal * 1.02 + kick * 0.92 + snare + hat * 0.8
+
+        # Gentle master envelope.
+        master = min(1.0, t / 0.12) * min(1.0, (duration_sec - t) / 0.20)
+        left = max(-0.92, min(0.92, left * master))
+        right = max(-0.92, min(0.92, right * master))
+
+        frames.extend(struct.pack("<hh", int(left * 15000), int(right * 15000)))
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(2)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(bytes(frames))
+    wav_bytes = buffer.getvalue()
+
+    exe = ffmpeg_bin()
+    if exe:
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                source = td / "song.wav"
+                output = td / "song.mp3"
+                source.write_bytes(wav_bytes)
+                result = subprocess.run(
+                    [exe, "-y", "-i", str(source), "-codec:a", "libmp3lame", "-b:a", "192k", str(output)],
+                    capture_output=True,
+                    timeout=120,
+                )
+                if result.returncode == 0 and output.exists():
+                    return output.read_bytes(), "audio/mp3", "mp3"
+        except Exception:
+            pass
+
+    return wav_bytes, "audio/wav", "wav"
 
 
 def page_music_generator():
-    st.markdown('<div class="neon-hero"><h1>🎼 Free AI Music & Song Generator</h1><p>Compose original lyrics, music blue-prints & generate real MP3 track previews (5s, 10s, 30s, 60s limit) powered by Gemini AI.</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="neon-hero"><h1>🎼 Free AI Song Generator</h1>'
+        '<p>Generates an actual playable song-like track instead of only returning a music blueprint.</p></div>',
+        unsafe_allow_html=True,
+    )
     c1, c2 = st.columns([2, 1])
     with c1:
-        lyrics_input = st.text_area("📝 Enter Your Lyrics or Song Topic", height=160, placeholder="Type your lyrics in Telugu, Hindi, English, etc. OR describe a topic (e.g. 'A high-energy party anthem about victory')...", key="mgen_lyrics")
+        lyrics_input = st.text_area(
+            "📝 Lyrics or Song Topic",
+            height=160,
+            placeholder="Write lyrics or a topic. Example: Telugu motivational song about success...",
+            key="mgen_lyrics",
+        )
     with c2:
-        genre_style = st.selectbox("🎸 Music Style & Genre", ["Bollywood Romantic / Melodic", "Tollywood Mass Folk / High Beat", "Lo-Fi Chill & Acoustic", "EDM / Cyberpunk Synthwave", "Cinematic Orchestral Epic", "Hip Hop / Indian Rap", "Devotional / Bhakti Fusion", "Classical Fusion & Sitar"], key="mgen_genre")
-        duration_sec = st.selectbox("⏱️ Song Duration (Free Limit: 60s)", ["5 Seconds (Jingle / Tag)", "10 Seconds (Reel Hook)", "30 Seconds (Half Verse)", "60 Seconds (Full Track - Max Free)"], index=3, key="mgen_duration")
-        vocal_type = st.selectbox("🎤 Vocal & Melody Arrangement", ["Male & Female Chorus Duet", "Solo Male Vocalist", "Solo Female Vocalist", "High Tempo Instrumental Beats"], key="mgen_vocal")
+        genre_style = st.selectbox(
+            "🎸 Music Style",
+            ["Bollywood Romantic / Melodic", "Tollywood Mass Folk / High Beat",
+             "Lo-Fi Chill & Acoustic", "EDM / Cyberpunk Synthwave",
+             "Cinematic Orchestral Epic", "Hip Hop / Indian Rap",
+             "Devotional / Bhakti Fusion", "Classical Fusion & Sitar"],
+            key="mgen_genre",
+        )
+        duration_sec = st.selectbox(
+            "⏱️ Duration",
+            [5, 10, 30, 60],
+            index=3,
+            format_func=lambda x: f"{x} seconds",
+            key="mgen_duration",
+        )
+        vocal_type = st.selectbox(
+            "🎤 Arrangement",
+            ["Solo Male Vocalist", "Solo Female Vocalist", "Male & Female Chorus Duet", "High Tempo Instrumental Beats"],
+            key="mgen_vocal",
+        )
 
-    dur_seconds = 60
-    if "5 Second" in duration_sec: dur_seconds = 5
-    elif "10 Second" in duration_sec: dur_seconds = 10
-    elif "30 Second" in duration_sec: dur_seconds = 30
-    elif "60 Second" in duration_sec: dur_seconds = 60
-
-    if st.button("🎼 Generate AI Song & MP3 Track", key="mgen_btn"):
+    if st.button("🎼 Generate Song Track", key="mgen_btn"):
         if not lyrics_input.strip():
-            st.warning("Please enter your custom lyrics or song prompt.")
+            st.warning("Please enter lyrics or a song topic.")
         else:
-            with st.spinner(f"Composing {dur_seconds}s original song arrangement & generating MP3 audio track..."):
+            with st.spinner(f"Generating a {duration_sec}-second song track..."):
+                # Gemini supplies a useful musical arrangement/lyric structure,
+                # while the local renderer guarantees an actual audio file.
                 prompt = (
-                    f"You are a master music producer and songwriter powered by RacharlaGPT.\n"
-                    f"Create a complete song blueprint and lyrics composition based on:\n"
-                    f"- Lyrics/Topic: {lyrics_input}\n"
-                    f"- Music Style: {genre_style}\n"
-                    f"- Duration Target: {dur_seconds} seconds\n"
-                    f"- Vocal Type: {vocal_type}\n\n"
-                    f"Provide:\n"
-                    f"1. 🎵 Song Title & Tempo (BPM)\n"
-                    f"2. 🎼 Musical Arrangement & Instrument Stems\n"
-                    f"3. 🎤 Timed Lyrics Breakdown matching {dur_seconds} Seconds\n"
-                    f"4. 🎹 Chord Progression & Melody Scale Notes\n"
+                    f"Create a concise song arrangement for: {lyrics_input}\n"
+                    f"Genre: {genre_style}; Duration: {duration_sec}s; Arrangement: {vocal_type}.\n"
+                    "Return title, BPM, chord progression, melody notes and a time-coded lyric structure."
                 )
-
                 ok, composition = gemini_generate(prompt)
-
-                if ok:
-                    st.markdown(f'<div class="neon-panel"><h3 style="color:#a855f7; margin-top:0;">⚡ Generated Music Track Preview ({dur_seconds} Seconds - MP3)</h3><p style="color:#cbd5e1; font-size:13px;">Procedural instrumental track generated based on your selected style ({genre_style}) and duration limit.</p></div>', unsafe_allow_html=True)
-
-                    try:
-                        audio_data, mime_type, fmt = generate_synthesized_music(
-                            duration_sec=dur_seconds,
-                            style=genre_style,
-                            requested_format="mp3"
-                        )
-
-                        st.audio(audio_data, format=mime_type)
-
-                        st.download_button(
-                            f"⬇️ Download AI Song Track (.{fmt.upper()})",
-                            data=audio_data,
-                            file_name=f"navabharat_ai_song_{dur_seconds}s.{fmt}",
-                            mime=mime_type,
-                            key="dl_generated_song_file"
-                        )
-                    except Exception:
-                        st.caption("Audio player preview loading; full composition rendered below.")
-
-                    st.markdown("---")
-                    render_answer(composition)
-                    st.markdown("---")
-                    st.markdown("### 📤 Share Your AI Song Creation")
-                    social_links(f"Listen to my new AI Song created on NavaBharat AI: {lyrics_input[:80]}", CHANNEL_URL)
-                else:
-                    st.error(composition)
+                try:
+                    audio_data, mime_type, fmt = generate_song_track(
+                        duration_sec, genre_style, lyrics_input, vocal_type
+                    )
+                    st.audio(audio_data, format=mime_type)
+                    st.download_button(
+                        f"⬇️ Download Song (.{fmt})",
+                        data=audio_data,
+                        file_name=f"navabharat_ai_song_{duration_sec}s.{fmt}",
+                        mime=mime_type,
+                        key="dl_generated_song_file",
+                    )
+                    if ok:
+                        st.markdown("### 🎼 AI Arrangement")
+                        render_answer(composition)
+                    else:
+                        st.info("Audio was generated locally. Gemini arrangement text was unavailable.")
+                except Exception as exc:
+                    st.error(f"Song generation failed: {clean_error(exc)}")
 
 
 def page_science():
@@ -1189,6 +1503,71 @@ def page_live():
                         st.markdown(f'<div class="card"><h4><a href="{item["link"]}" target="_blank" style="text-decoration:none; color:#2563eb;">{item["title"]}</a></h4><p style="font-size:12px; color:#64748b;">Source: {item["source"]} | Date: {item["pubDate"]}</p></div>', unsafe_allow_html=True)
                 else:
                     st.info("Unable to load RSS news feed currently.")
+
+
+def page_current_affairs():
+    st.markdown(
+        '<div class="hero"><h1>🗞️ Daily Current Affairs</h1>'
+        '<p>Fresh daily headlines and optional AI summaries in Telugu, English, Hindi and other Indian languages.</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    lang = st.selectbox("Language", list(RSS_FEEDS.keys()), key="ca_lang")
+    category = st.selectbox(
+        "Category",
+        ["All", "India", "World", "Business", "Technology", "Science", "Sports", "Education"],
+        key="ca_category",
+    )
+    count = st.slider("Number of headlines", 5, 20, 12, key="ca_count")
+
+    if st.button("📰 Load Today's Current Affairs", key="ca_load"):
+        with st.spinner("Fetching today's latest headlines..."):
+            items = fetch_rss(RSS_FEEDS[lang], limit=count * 2)
+            if category != "All":
+                terms = {
+                    "India": ["india", "indian"],
+                    "World": ["world", "international", "global"],
+                    "Business": ["business", "economy", "market", "finance"],
+                    "Technology": ["technology", "tech", "ai", "software"],
+                    "Science": ["science", "space", "research"],
+                    "Sports": ["sport", "cricket", "football", "tennis"],
+                    "Education": ["education", "school", "university", "exam"],
+                }[category]
+                items = [x for x in items if any(t in x["title"].lower() for t in terms)]
+            items = items[:count]
+
+            if not items:
+                st.info("No current-affairs items were returned. Try All categories.")
+                return
+
+            st.session_state["current_affairs_items"] = items
+            st.session_state["current_affairs_lang"] = lang
+
+    items = st.session_state.get("current_affairs_items", [])
+    if items:
+        st.markdown(f"### 📅 Today's Feed — {st.session_state.get('current_affairs_lang', lang)}")
+        for n, item in enumerate(items, 1):
+            safe_title = html.escape(item["title"])
+            safe_link = html.escape(item["link"], quote=True)
+            st.markdown(
+                f'<div class="card"><h4>{n}. <a href="{safe_link}" target="_blank" '
+                f'style="text-decoration:none;color:#2563eb;">{safe_title}</a></h4>'
+                f'<p style="font-size:12px;color:#64748b;">{html.escape(item["source"])} · {html.escape(item["pubDate"])}</p></div>',
+                unsafe_allow_html=True,
+            )
+
+        if st.button("🤖 Create Daily Current-Affairs Quiz", key="ca_quiz"):
+            headline_text = "\n".join(f"- {x['title']}" for x in items)
+            with st.spinner("Creating a quiz from today's feed..."):
+                ok, quiz = gemini_generate(
+                    f"Create 10 current-affairs MCQs from these latest headlines. "
+                    f"Answer in {lang}. Do not invent facts not present in the headlines. "
+                    f"Give 4 options and mark the correct answer.\n{headline_text}"
+                )
+                if ok:
+                    render_answer(quiz)
+                else:
+                    st.error(quiz)
 
 
 def page_jobs_exams():
@@ -1324,10 +1703,21 @@ def page_about():
         else: st.error("❌ GEMINI_API_KEY is missing in secrets")
 
         ga_sec = safe_secret("GA_MEASUREMENT_ID")
-        if ga_sec: st.info(f"📊 GA4 ID: `{ga_sec}`")
+        if ga_sec:
+            st.info(f"📊 GA4 Measurement ID: `{ga_sec}`")
+            st.caption("Use GA4 Realtime to confirm incoming page_view events after deployment.")
 
         mon_sec = safe_secret("MONETAG_ZONE_ID")
-        if mon_sec: st.info(f"💰 Monetag Zone ID: `{mon_sec}`")
+        if mon_sec:
+            st.info(f"💰 Monetag Zone ID: `{mon_sec}`")
+        if safe_secret("GOOGLE_SITE_VERIFICATION"):
+            st.success("✅ Google site-verification token configured")
+        else:
+            st.warning("⚠️ GOOGLE_SITE_VERIFICATION secret not configured")
+        if safe_secret("MONETAG_VERIFICATION_META"):
+            st.success("✅ Monetag verification token configured")
+        else:
+            st.warning("⚠️ MONETAG_VERIFICATION_META secret not configured")
 
         if ffmpeg_bin(): st.success("✅ FFmpeg MP3 Encoder active")
         else: st.warning("⚠️ FFmpeg binary not detected (WAV fallback active)")
@@ -1345,6 +1735,7 @@ NAVIGATION = {
     "🔬 AI Science Solver": page_science,
     "🌐 Translator": page_translator,
     "📡 Live Information": page_live,
+    "🗞️ Daily Current Affairs": page_current_affairs,
     "💼 Jobs & Exams": page_jobs_exams,
     "🎧 RacharlaGPT Music": page_music,
     "🎬 Video Studio": page_video,
