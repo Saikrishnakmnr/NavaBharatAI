@@ -1203,9 +1203,11 @@ def page_home():
         
         st.markdown('<div class="card home-card-5"><h3>🎨 Free AI Image Generator</h3><p>Generate sharp, clear photorealistic photos, digital art, anime, and transform uploaded photos instantly.</p></div>', unsafe_allow_html=True)
         if st.button("🎨 Open AI Image Generator", key="home_image_gen"): go("🎨 Free AI Image Generator")
+        st.markdown('<div class="card home-card-4"><h3>✨ NavaBharat Design Studio</h3><p>Create premium posters, social posts, thumbnails, announcements, and photo cards locally without depending on an image API.</p></div>', unsafe_allow_html=True)
+        if st.button("✨ Open Design Studio", key="home_design_studio"): go("✨ NavaBharat Design Studio")
 
     with c2:
-        st.markdown('<div class="card home-card-7"><h3 style="color:#c084fc;">🎼 Free AI Music Generator</h3><p style="color:#cbd5e1;">Compose custom songs, arrange lyrics, select genres, and generate 5s to 60s free MP3 audio tracks with a neon interface.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card home-card-7"><h3>🎼 Free AI Music Generator</h3><p>Compose custom songs, arrange lyrics, select genres, and generate 5s to 60s free MP3 audio tracks with a neon interface.</p></div>', unsafe_allow_html=True)
         if st.button("🎼 Open AI Music Generator", key="home_music_gen"): go("🎼 Free AI Music Generator")
         
         st.markdown('<div class="card home-card-2"><h3>🌐 Translator</h3><p>Translate between English, Telugu, Hindi, Tamil, Kannada, Malayalam, Bengali, Gujarati, Punjabi, and Marathi.</p></div>', unsafe_allow_html=True)
@@ -1333,9 +1335,9 @@ def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image
         "API_KEY_SERVICE_BLOCKED", "INVALID_API_KEY", "PERMISSION_DENIED",
     ]):
         return None, None, (
-            "Gemini image generation was rejected by Google. The app now uses Google's official "
-            "GenAI SDK authentication with the existing Gemini API keys and the documented "
-            f"{model} image model. Detail: {last_error}"
+            "Google rejected the Gemini credential before image generation. This is an authentication/key-type issue, not a prompt or image issue. "
+            "In Google's September 2026 Gemini API key transition, standard API keys are being rejected; use a current Gemini authorization (auth) key in GEMINI_API_KEY or GEMINI_API_KEY_2, then redeploy. "
+            f"Detail: {last_error}"
         )
     return None, None, last_error or "Gemini did not return an image."
 
@@ -2624,6 +2626,143 @@ def page_creator():
                     st.error(answer)
 
 
+
+def _design_gradient(theme, W, H):
+    from PIL import Image
+    palettes = {
+        "Aurora": ((14, 165, 233), (124, 58, 237), (236, 72, 153)),
+        "Sunset": ((251, 146, 60), (244, 63, 94), (168, 85, 247)),
+        "Ocean": ((8, 145, 178), (37, 99, 235), (79, 70, 229)),
+        "Emerald": ((5, 150, 105), (16, 185, 129), (34, 211, 238)),
+        "Royal": ((79, 70, 229), (124, 58, 237), (236, 72, 153)),
+        "Midnight": ((15, 23, 42), (30, 41, 59), (79, 70, 229)),
+    }
+    colors = palettes.get(theme, palettes["Aurora"])
+    img = Image.new("RGB", (W, H), colors[0])
+    px = img.load()
+    stops = colors
+    for y in range(H):
+        t = y / max(1, H - 1)
+        if t < 0.5:
+            a, b, u = stops[0], stops[1], t * 2
+        else:
+            a, b, u = stops[1], stops[2], (t - 0.5) * 2
+        c = tuple(int(a[i] * (1-u) + b[i] * u) for i in range(3))
+        for x in range(W):
+            side = x / max(1, W - 1)
+            lift = int(20 * (0.5 - abs(side - 0.5)))
+            px[x, y] = tuple(min(255, v + lift) for v in c)
+    return img
+
+
+def _fit_design_photo(image_bytes, size):
+    from PIL import Image, ImageOps
+    try:
+        src = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return ImageOps.fit(src, size, method=Image.Resampling.LANCZOS)
+    except Exception:
+        return None
+
+
+def _make_design_card(headline, subtitle, footer, template, theme, photo_bytes=None):
+    from PIL import Image, ImageDraw
+    sizes = {
+        "Instagram Square": (1080, 1080),
+        "Instagram Portrait": (1080, 1350),
+        "Instagram / WhatsApp Story": (1080, 1920),
+        "YouTube Thumbnail": (1280, 720),
+        "LinkedIn Post": (1200, 627),
+        "Quote Poster": (1080, 1350),
+        "Announcement": (1080, 1080),
+    }
+    W, H = sizes.get(template, (1080, 1080))
+    img = _design_gradient(theme, W, H)
+    draw = ImageDraw.Draw(img, "RGBA")
+    # Glossy decorative shapes.
+    draw.ellipse((W-int(W*.28), -int(H*.10), W+int(W*.08), int(H*.22)), fill=(255,255,255,38))
+    draw.ellipse((-int(W*.14), int(H*.72), int(W*.20), H+int(H*.10)), fill=(255,255,255,28))
+    draw.rounded_rectangle((int(W*.055), int(H*.055), int(W*.945), int(H*.945)), radius=max(24, W//28), outline=(255,255,255,72), width=max(2,W//360))
+
+    if photo_bytes:
+        photo = _fit_design_photo(photo_bytes, (int(W*.78), int(H*.42)))
+        if photo:
+            x, y = int(W*.11), int(H*.12)
+            mask = Image.new("L", photo.size, 0)
+            md = ImageDraw.Draw(mask)
+            md.rounded_rectangle((0,0,*photo.size), radius=max(20,W//35), fill=255)
+            img.paste(photo, (x,y), mask)
+            draw.rounded_rectangle((x,y,x+photo.width,y+photo.height), radius=max(20,W//35), outline=(255,255,255,150), width=max(3,W//270))
+            text_top = y + photo.height + int(H*.07)
+        else:
+            text_top = int(H*.25)
+    else:
+        text_top = int(H*.25)
+
+    brand_font = _search_image_font(max(22, W//46), True)
+    title_font = _search_image_font(max(46, W//13 if W <= 1100 else W//15), True)
+    sub_font = _search_image_font(max(24, W//34), False)
+    footer_font = _search_image_font(max(18, W//55), False)
+
+    draw.text((int(W*.10), int(H*.09)), "NavaBharat AI", font=brand_font, fill=(255,255,255,235))
+    maxw = int(W*.80)
+    title_lines = _wrap_image_text(draw, headline or "Your headline", title_font, maxw)[:5]
+    if template == "Quote Poster" and len(title_lines) > 0:
+        title_lines = ["“" + title_lines[0]] + title_lines[1:]
+    y = text_top
+    line_gap = max(8, title_font.size//7)
+    for line in title_lines:
+        draw.text((int(W*.10), y), line, font=title_font, fill=(255,255,255,255), stroke_width=max(1,W//700), stroke_fill=(15,23,42,55))
+        y += title_font.size + line_gap
+    if subtitle.strip():
+        y += int(H*.025)
+        for line in _wrap_image_text(draw, subtitle, sub_font, maxw)[:4]:
+            draw.text((int(W*.10), y), line, font=sub_font, fill=(241,245,249,235))
+            y += sub_font.size + max(5, sub_font.size//5)
+    if footer.strip():
+        draw.text((int(W*.10), int(H*.88)), footer[:110], font=footer_font, fill=(255,255,255,205))
+    badge = template.upper()
+    bb = draw.textbbox((0,0), badge, font=footer_font)
+    bw = bb[2]-bb[0]+34; bh = bb[3]-bb[1]+18
+    bx = W-int(W*.10)-bw
+    by = int(H*.09)
+    draw.rounded_rectangle((bx,by,bx+bw,by+bh), radius=bh//2, fill=(255,255,255,35), outline=(255,255,255,80), width=2)
+    draw.text((bx+17, by+8), badge, font=footer_font, fill=(255,255,255,230))
+    out=io.BytesIO(); img.convert("RGB").save(out, format="PNG", optimize=True); return out.getvalue(), (W,H)
+
+
+def page_design_studio():
+    st.markdown('<div class="hero"><h1>✨ NavaBharat Design Studio</h1><p>Create polished social posts, posters, thumbnails and announcements locally — no Gemini image API required.</p></div>', unsafe_allow_html=True)
+    st.info("🚀 This studio is designed to keep working even when an external AI image service is unavailable.")
+    c1, c2 = st.columns(2)
+    with c1:
+        template = st.selectbox("🎯 Design Format", ["Instagram Square", "Instagram Portrait", "Instagram / WhatsApp Story", "YouTube Thumbnail", "LinkedIn Post", "Quote Poster", "Announcement"], key="design_template")
+        headline = st.text_input("📝 Main Headline", placeholder="Your big message goes here", key="design_headline")
+        subtitle = st.text_area("💬 Supporting Text", height=110, placeholder="Add a short explanation, offer, quote, or call to action.", key="design_subtitle")
+    with c2:
+        theme = st.selectbox("🌈 Visual Theme", ["Aurora", "Sunset", "Ocean", "Emerald", "Royal", "Midnight"], key="design_theme")
+        footer = st.text_input("🏷️ Footer / Brand Line", value="NavaBharat AI", key="design_footer")
+        photo = st.file_uploader("📸 Optional Photo", type=["png", "jpg", "jpeg", "webp"], key="design_photo")
+        st.caption("Tip: add a photo for a premium photo-card layout. Your image stays inside this generation flow.")
+
+    if st.button("🎨 Create Design", key="design_create_btn", type="primary"):
+        if not headline.strip():
+            st.warning("Please enter a headline first.")
+        else:
+            try:
+                with st.spinner("Designing your graphic..."):
+                    data, size = _make_design_card(headline.strip(), subtitle.strip(), footer.strip(), template, theme, photo.getvalue() if photo else None)
+                st.session_state["design_result"] = data
+                st.session_state["design_result_name"] = re.sub(r"[^a-zA-Z0-9]+", "-", headline.strip())[:50].strip("-").lower() or "navabharat-design"
+                st.success(f"✅ Design ready — {size[0]}×{size[1]} PNG")
+            except Exception as exc:
+                st.error(f"Design generation error: {clean_error(exc)}")
+
+    if st.session_state.get("design_result"):
+        st.markdown("### 🖼️ Your Design")
+        st.image(st.session_state["design_result"], use_container_width=True)
+        filename = st.session_state.get("design_result_name", "navabharat-design") + ".png"
+        st.download_button("⬇️ Download PNG", data=st.session_state["design_result"], file_name=filename, mime="image/png", key="design_download")
+
 def page_about():
     st.markdown('<div class="hero"><h1>ℹ️ About & System Diagnostics</h1><p>Application configuration, API status, and environment details.</p></div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
@@ -2676,6 +2815,7 @@ NAVIGATION = {
     "🏠 Home": page_home,
     "🧠 Solve Anything": page_solve,
     "🎨 Free AI Image Generator": page_image_generator,
+    "✨ NavaBharat Design Studio": page_design_studio,
     "🎼 Free AI Music Generator": page_music_generator,
     "🔬 AI Science Solver": page_science,
     "🌐 Translator": page_translator,
