@@ -8,6 +8,8 @@ import wave
 import struct
 import tempfile
 import subprocess
+import shutil
+import uuid
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -1296,80 +1298,150 @@ def acestep_key():
     )
 
 
+def _acestep_audio_bytes_from_response(body):
+    """Extract ACE-Step cloud audio from an OpenAI-compatible response."""
+    choices = body.get("choices") or []
+    message = choices[0].get("message", {}) if choices else {}
+    audio_items = message.get("audio") or body.get("audio") or []
+    if isinstance(audio_items, dict):
+        audio_items = [audio_items]
+
+    for item in audio_items:
+        if not isinstance(item, dict):
+            continue
+        candidates = [
+            item.get("audio_url", {}).get("url") if isinstance(item.get("audio_url"), dict) else None,
+            item.get("url"),
+            item.get("data"),
+        ]
+        for value in candidates:
+            if not value:
+                continue
+            if isinstance(value, str) and value.startswith("data:"):
+                try:
+                    encoded = value.split(",", 1)[1]
+                    return base64.b64decode(encoded), "audio/wav", "wav"
+                except Exception:
+                    continue
+            if isinstance(value, str):
+                try:
+                    return base64.b64decode(value), "audio/wav", "wav"
+                except Exception:
+                    continue
+
+    # Some compatible responses expose base64 directly in message.audio.data.
+    raw_audio = message.get("audio")
+    if isinstance(raw_audio, str):
+        try:
+            return base64.b64decode(raw_audio), "audio/wav", "wav"
+        except Exception:
+            pass
+
+    detail = message.get("content") or body.get("error") or body.get("message") or body
+    if isinstance(detail, (dict, list)):
+        detail = json.dumps(detail, ensure_ascii=False)[:2500]
+    raise RuntimeError(f"ACE-Step returned no usable audio: {detail}")
+
+
 def generate_song_with_acestep(duration_sec: int, style: str, lyrics: str, vocal_type: str):
-    """Generate a real song with vocals/instrumentation through ACE-Step cloud API."""
+    """Generate a real song with vocals + instruments using ACE Music cloud API.
+
+    ACE Music's current cloud API is OpenAI-compatible:
+    POST /v1/chat/completions. It returns audio inline, so no task polling is needed.
+    """
     key = acestep_key()
     if not key:
         return None, None, None, "ACESTEP_API_KEY/ACE_API_KEY/ACE_APP_KEY is not configured."
 
     base_url = safe_secret("ACESTEP_BASE_URL", "https://api.acemusic.ai").rstrip("/")
-    tags = f"{style}, {vocal_type}, polished studio production, clear lead vocal, coherent verse and chorus"
+    model = safe_secret("ACESTEP_MODEL", "acemusic/acestep-v1.5-turbo")
+    vocal_language = safe_secret("ACESTEP_VOCAL_LANGUAGE", "en")
+
+    # Give ACE-Step enough musical context to produce a complete song rather than
+    # an instrumental loop. Lyrics are kept verbatim and vocals are explicitly requested.
+    prompt = (
+        f"Create a complete finished song in the style of {style}. "
+        f"Use {vocal_type}. Include clear lead vocals, musical accompaniment, "
+        f"drums/bass/harmony appropriate to the genre, a distinct verse and chorus, "
+        f"and a polished beginning and ending. Do not make it instrumental. "
+        f"Perform the supplied lyrics naturally and keep the lyrics' language."
+    )
+
     payload = {
-        "tags": tags,
-        "lyrics": lyrics.strip(),
-        "seconds": int(duration_sec),
-        "steps": int(safe_secret("ACESTEP_STEPS", "12")),
-        "studio_quality": True,
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": f"{prompt}\n\nLYRICS:\n{lyrics.strip()}"
+        }],
+        "modalities": ["audio"],
+        "stream": False,
+        "task_type": "text2music",
+        "thinking": True,
+        "use_cot_caption": True,
+        "use_cot_language": True,
+        "audio_config": {
+            "format": "mp3",
+            "vocal_language": vocal_language,
+            "instrumental": False,
+            "duration": float(duration_sec),
+        },
     }
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "NavaBharat-AI/8.0",
+        # ACE-Step integrations document a curl-like User-Agent for the cloud API.
+        "User-Agent": "curl/8.4.0",
     }
 
     try:
         response = requests.post(
-            f"{base_url}/api/v2/generate-audio",
+            f"{base_url}/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=60,
+            timeout=max(180, int(duration_sec) * 20),
         )
-        response.raise_for_status()
-        body = response.json()
-        if body.get("code") not in (0, None):
-            return None, None, None, str(body.get("msg") or body.get("error") or "ACE-Step generation request failed")
-
-        tasks = ((body.get("data") or {}).get("tasks") or [])
-        task_id = (tasks[0] or {}).get("task_id") if tasks else None
-        if not task_id:
-            return None, None, None, "ACE-Step did not return a task ID."
-
-        progress_placeholder = st.empty()
-        for attempt in range(60):
-            status_response = requests.get(
-                f"{base_url}/api/v2/task-status/{task_id}",
-                headers=headers,
-                timeout=30,
+        if not response.ok:
+            detail = response.text[:3000]
+            return None, None, None, (
+                f"ACE-Step API HTTP {response.status_code} at {base_url}/v1/chat/completions: {detail}"
             )
-            status_response.raise_for_status()
-            status_body = status_response.json()
-            data = status_body.get("data") or {}
-            status = str(data.get("status", "")).lower()
-            progress = data.get("progress")
-            if progress is not None:
-                progress_placeholder.caption(f"ACE-Step generation: {progress}% · {status or 'processing'}")
 
-            if status == "completed":
-                audio_url = data.get("audio_url")
-                if not audio_url:
-                    return None, None, None, "ACE-Step completed but returned no audio URL."
-                audio_response = requests.get(audio_url, timeout=120)
-                audio_response.raise_for_status()
-                progress_placeholder.empty()
-                return audio_response.content, "audio/mpeg", "mp3", ""
+        body = response.json()
+        audio_bytes, mime_type, fmt = _acestep_audio_bytes_from_response(body)
 
-            if status in {"failed", "cancelled", "expired"}:
-                progress_placeholder.empty()
-                return None, None, None, str(data.get("message") or f"ACE-Step task status: {status}")
+        # The API may return WAV data even when MP3 was requested. Convert when
+        # ffmpeg is available; otherwise preserve the actual returned format.
+        if fmt == "wav" and shutil.which("ffmpeg"):
+            try:
+                wav_path = os.path.join(tempfile.gettempdir(), f"ace_{uuid.uuid4().hex}.wav")
+                mp3_path = os.path.join(tempfile.gettempdir(), f"ace_{uuid.uuid4().hex}.mp3")
+                with open(wav_path, "wb") as fh:
+                    fh.write(audio_bytes)
+                subprocess.run(
+                    ["ffmpeg", "-y", "-loglevel", "error", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "2", mp3_path],
+                    check=True,
+                    timeout=120,
+                )
+                with open(mp3_path, "rb") as fh:
+                    audio_bytes = fh.read()
+                for path in (wav_path, mp3_path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                mime_type, fmt = "audio/mpeg", "mp3"
+            except Exception:
+                # Keep the valid WAV instead of failing a successful generation.
+                mime_type, fmt = "audio/wav", "wav"
 
-            time.sleep(2)
-
-        progress_placeholder.empty()
-        return None, None, None, "ACE-Step generation timed out while waiting for the task to complete."
+        return audio_bytes, mime_type, fmt, ""
+    except requests.exceptions.Timeout:
+        return None, None, None, "ACE-Step cloud request timed out. Try a shorter song or try again."
+    except requests.exceptions.RequestException as exc:
+        return None, None, None, clean_error(exc)
     except Exception as exc:
         return None, None, None, clean_error(exc)
-
 
 def generate_song_track(duration_sec: int, style: str, lyrics: str, vocal_type: str):
     """
