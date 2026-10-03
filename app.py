@@ -3,6 +3,7 @@ import os
 import re
 import time
 import html
+import hmac
 import math
 import wave
 import struct
@@ -11,6 +12,8 @@ import subprocess
 import shutil
 import uuid
 import urllib.parse
+import json
+import base64
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -650,7 +653,9 @@ def gemini_key():
 def configured_models():
     primary = safe_secret("GEMINI_MODEL", "gemini-3.8-flash")
     # Only use currently documented stable Gemini API model IDs.
-    models = [primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    # Keep the fallback set on current 3.x models. Do not silently fall back to older
+    # model IDs when the user's credential is rejected; that obscures the real problem.
+    models = [primary, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
     return list(dict.fromkeys(x.strip() for x in models if x.strip()))
 
 
@@ -676,20 +681,19 @@ def clean_error(exc):
     return text[:1600]
 
 
-def gemini_generate(prompt: str, grounded: bool = False, retries: int = 2):
-    """Reliable Gemini text generation with explicit API-key authentication.
+def gemini_generate(prompt: str, grounded: bool = False, retries: int = 1):
+    """Generate text with Gemini using only configured Gemini credentials.
 
-    Non-grounded requests use the REST API directly so an OAuth token accidentally
-    stored under GOOGLE_API_KEY cannot interfere with the configured Gemini keys.
-    Grounded requests use the SDK because Google Search grounding is a tool feature.
+    Authentication failures are treated as credential failures, not as model failures.
+    This prevents the UI from misleadingly ending on an old model such as gemini-2.5-flash.
     """
     keys = gemini_keys()
     if not keys:
-        return False, "Gemini is not connected. Add GEMINI_API_KEY (and optionally GEMINI_API_KEY_2) to Streamlit Secrets."
+        return False, "Gemini is not connected. Add GEMINI_API_KEY and optionally GEMINI_API_KEY_2 to Streamlit Secrets."
 
     last_error = ""
     models = configured_models()
-    for api_key in keys:
+    for key_index, api_key in enumerate(keys, start=1):
         for model in models:
             for attempt in range(retries + 1):
                 try:
@@ -703,54 +707,83 @@ def gemini_generate(prompt: str, grounded: bool = False, retries: int = 2):
                         answer = getattr(response, "text", None)
                     else:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent"
-                        payload = {
-                            "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"temperature": 0.4},
-                        }
+                        payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4}}
                         response = requests.post(
-                            url, headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-                            json=payload, timeout=90
+                            url,
+                            headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
+                            json=payload,
+                            timeout=90,
                         )
+                        raw = response.text[:1800]
                         if not response.ok:
-                            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:1200]}")
+                            # 401/403 is credential or access configuration; trying five models
+                            # with the same bad credential only creates misleading errors.
+                            if response.status_code in (401, 403):
+                                raise RuntimeError(f"Gemini credential rejected (HTTP {response.status_code}): {raw}")
+                            raise RuntimeError(f"HTTP {response.status_code}: {raw}")
                         data = response.json()
                         parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
-                        answer = "".join(str(part.get("text", "")) for part in parts if part.get("text"))
-                    if answer and answer.strip():
-                        return True, answer.strip()
-                    last_error = f"{model}: empty response"
+                        answer = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict) and part.get("text"))
+
+                    if answer and str(answer).strip():
+                        return True, str(answer).strip()
+                    last_error = f"Gemini key {key_index} / {model}: empty response"
                     break
                 except Exception as exc:
                     raw = str(exc)
-                    last_error = f"{model}: {clean_error(exc)}"
+                    last_error = f"Gemini key {key_index} / {model}: {clean_error(exc)}"
+                    if any(x in raw.upper() for x in ["401", "UNAUTHENTICATED", "ACCESS_TOKEN_TYPE_UNSUPPORTED", "CREDENTIAL"]):
+                        # Do not keep trying models with a rejected credential.
+                        break
                     transient = any(k in raw.upper() for k in ["429", "500", "502", "503", "504", "TIMEOUT", "DEADLINE", "UNAVAILABLE", "RESOURCE_EXHAUSTED"])
                     if transient and attempt < retries:
                         time.sleep(1.5 * (2 ** attempt))
                         continue
                     break
+
+    if "ACCESS_TOKEN_TYPE_UNSUPPORTED" in last_error or "UNAUTHENTICATED" in last_error:
+        return False, (
+            "Gemini authentication was rejected. This is a credential problem, not a prompt/model problem. "
+            "Verify that the complete current Gemini API key is pasted into Streamlit Secrets as GEMINI_API_KEY / GEMINI_API_KEY_2, "
+            "with no quotes inside the value and no truncation. Google documents x-goog-api-key authentication for the Gemini API. "
+            f"Last check: {last_error}"
+        )
     return False, f"Gemini temporarily unavailable. Detail: {last_error}"
 
 
 def gemini_analyze_image(image_bytes: bytes, user_prompt: str = "") -> str:
-    """Uses Gemini Vision to analyze an uploaded image and create a transformed AI image description."""
-    client = get_gemini_client()
-    if not client:
+    """Analyze an uploaded image with the same REST/API-key path as normal Gemini text."""
+    keys = gemini_keys()
+    if not keys:
         return ""
-    try:
-        from google.genai import types
-        part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-        prompt = (
-            "Analyze the scene, subject, gender, clothing, background, and features in this image in detail. "
-            f"Modify the scene according to this user instruction: '{user_prompt}'. "
-            "Return a clean, detailed text prompt suitable for an AI image generator to create a sharp high quality image."
-        )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[part, prompt]
-        )
-        return getattr(response, "text", "").strip()
-    except Exception:
-        return ""
+    for api_key in keys:
+        for model in configured_models():
+            try:
+                prompt = (
+                    "Analyze this uploaded image and describe only what is visibly present. "
+                    f"Then explain how to apply this requested edit: {user_prompt}. "
+                    "Preserve the person's identity, pose, objects and composition unless the user explicitly asks to change them."
+                )
+                payload = {
+                    "contents": [{"parts": [
+                        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(image_bytes).decode("utf-8")}},
+                        {"text": prompt},
+                    ]}],
+                }
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent"
+                r = requests.post(url, headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, json=payload, timeout=90)
+                if not r.ok:
+                    if r.status_code in (401, 403):
+                        break
+                    continue
+                data = r.json()
+                parts = (((data.get("candidates") or [{}])[0]).get("content") or {}).get("parts") or []
+                text = "".join(str(x.get("text", "")) for x in parts if isinstance(x, dict) and x.get("text"))
+                if text.strip():
+                    return text.strip()
+            except Exception:
+                continue
+    return ""
 
 
 def render_answer(answer):
@@ -862,75 +895,116 @@ def generate_synthesized_music(duration_sec: int = 10, style: str = "Bollywood",
 def video_to_audio(data: bytes, suffix=".mp4"):
     exe = ffmpeg_bin()
     if not exe:
-        raise RuntimeError("FFmpeg runtime unavailable.")
+        raise RuntimeError("FFmpeg runtime unavailable. Add FFmpeg to packages.txt or use a Streamlit image that includes it.")
+    if not data:
+        raise RuntimeError("The uploaded video is empty.")
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
-        source = td / ("source" + suffix)
+        safe_suffix = suffix if suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"} else ".mp4"
+        source = td / ("source" + safe_suffix)
         output = td / "audio.mp3"
         source.write_bytes(data)
-
         command = [
-            exe, "-y", "-i", str(source),
-            "-vn", "-codec:a", "libmp3lame", "-q:a", "2",
-            str(output)
+            exe, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source), "-map", "0:a:0?", "-vn", "-sn", "-dn",
+            "-codec:a", "libmp3lame", "-q:a", "2", "-threads", "0", str(output),
         ]
-
-        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
-        if result.returncode != 0 or not output.exists():
-            raise RuntimeError("Audio extraction failed.")
-
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0 or not output.exists() or output.stat().st_size < 1024:
+            detail = (result.stderr or result.stdout or "No audio stream found")[-1800:]
+            raise RuntimeError(f"Audio extraction failed: {detail}")
         return output.read_bytes()
 
 
+def _ffprobe_duration(path: Path) -> float:
+    """Read media duration using the ffmpeg executable bundled by imageio_ffmpeg."""
+    exe = ffmpeg_bin()
+    if not exe:
+        return 0.0
+    try:
+        result = subprocess.run(
+            [exe, "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        text = result.stderr or result.stdout or ""
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+        if not match:
+            return 0.0
+        h, m, sec = match.groups()
+        return int(h) * 3600 + int(m) * 60 + float(sec)
+    except Exception:
+        return 0.0
+
+
 def make_reel(images, audio_bytes=None, fps=30):
+    """Render every supplied image as a slide and fit the complete sequence to the audio when present."""
     exe = ffmpeg_bin()
     if not exe:
         raise RuntimeError("FFmpeg runtime unavailable.")
+    if not images:
+        raise RuntimeError("No images supplied.")
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
+        # Normalize every upload to a real PNG. This avoids extension/content mismatches
+        # when users upload JPG/WEBP but the old code wrote them as .png.
+        normalized = []
         for index, data in enumerate(images):
-            (td / f"image_{index:03d}.png").write_bytes(data)
+            src = td / f"upload_{index:03d}"
+            src.write_bytes(data)
+            png = td / f"image_{index:03d}.png"
+            conv = subprocess.run(
+                [exe, "-y", "-i", str(src), "-vf", "format=yuv420p", str(png)],
+                capture_output=True, text=True, timeout=60,
+            )
+            if conv.returncode != 0 or not png.exists():
+                raise RuntimeError(f"Could not decode reel image {index + 1}.")
+            normalized.append(png)
+
+        audio_path = None
+        audio_duration = 0.0
+        if audio_bytes:
+            audio_path = td / "music_input"
+            audio_path.write_bytes(audio_bytes)
+            audio_duration = _ffprobe_duration(audio_path)
+
+        # With audio, distribute the available song duration across ALL photos so
+        # a short song cannot leave the user seeing only the first image.
+        if audio_duration > 0:
+            slide_duration = max(0.5, audio_duration / len(normalized))
+        else:
+            slide_duration = 3.0
+        total_duration = slide_duration * len(normalized)
 
         concat_file = td / "list.txt"
         lines = []
-        duration = 3
-
-        for index in range(len(images)):
-            image_path = td / f"image_{index:03d}.png"
-            lines.append(f"file '{image_path.as_posix()}'")
-            lines.append(f"duration {duration}")
-
-        last_image = td / f"image_{len(images)-1:03d}.png"
-        lines.append(f"file '{last_image.as_posix()}'")
+        for image_path in normalized:
+            # concat demuxer requires escaped absolute paths.
+            safe = str(image_path).replace("'", "'\\''")
+            lines.append(f"file '{safe}'")
+            lines.append(f"duration {slide_duration:.6f}")
+        lines.append(f"file '{str(normalized[-1]).replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))}'")
         concat_file.write_text("\n".join(lines), encoding="utf-8")
-
-        audio_path = None
-        if audio_bytes:
-            audio_path = td / "music.mp3"
-            audio_path.write_bytes(audio_bytes)
 
         output = td / "reel.mp4"
         command = [exe, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file)]
-
         if audio_path:
             command += ["-i", str(audio_path)]
-
         command += [
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-            "-r", str(fps), "-pix_fmt", "yuv420p", "-c:v", "libx264"
+            "-t", f"{total_duration:.3f}",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p",
+            "-r", str(fps), "-c:v", "libx264", "-preset", "veryfast", "-movflags", "+faststart",
         ]
-
         if audio_path:
-            command += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
-
+            command += ["-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0"]
+        else:
+            command += ["-an"]
         command += [str(output)]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=240)
-
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
         if result.returncode != 0 or not output.exists():
-            raise RuntimeError("Reel rendering failed.")
-
+            detail = (result.stderr or result.stdout or "FFmpeg failed")[-1800:]
+            raise RuntimeError(f"Reel rendering failed: {detail}")
         return output.read_bytes()
 
 
@@ -1061,14 +1135,13 @@ def page_solve():
 
 def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image/png",
                           aspect_ratio: str = "1:1", image_size: str = "2K"):
-    """Generate/edit with Google's documented Gemini 3.1 Flash Image API."""
+    """Generate/edit with Gemini 3.1 Flash Image using the Interactions API."""
     keys = gemini_keys()
     if not keys:
         return None, None, "No Gemini API key is configured."
-    import base64
     last_error = ""
     model = safe_secret("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
-    for api_key in keys:
+    for key_index, api_key in enumerate(keys, start=1):
         try:
             inputs = []
             if image_bytes:
@@ -1081,24 +1154,35 @@ def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image
             }
             response = requests.post(
                 "https://generativelanguage.googleapis.com/v1beta/interactions",
-                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-                json=payload, timeout=180
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "Accept": "application/json"},
+                json=payload, timeout=180,
             )
+            if response.status_code in (401, 403):
+                last_error = f"Gemini image key {key_index} rejected (HTTP {response.status_code}): {response.text[:1200]}"
+                continue
             if not response.ok:
-                last_error = f"{model}: HTTP {response.status_code}: {response.text[:1200]}"
+                last_error = f"Gemini image key {key_index}: HTTP {response.status_code}: {response.text[:1200]}"
                 continue
             body = response.json()
-            out = body.get("output_image") or {}
+            out = body.get("output_image") or body.get("outputImage") or {}
             data = out.get("data") if isinstance(out, dict) else None
             if data:
-                return base64.b64decode(data), out.get("mime_type", "image/png"), ""
+                return base64.b64decode(data), out.get("mime_type") or out.get("mimeType") or "image/png", ""
+            # Official response can also expose image blocks inside model_output steps.
             for step in body.get("steps", []) or []:
+                if not isinstance(step, dict):
+                    continue
                 for block in step.get("content", []) or []:
-                    if block.get("type") == "image" and block.get("data"):
-                        return base64.b64decode(block["data"]), block.get("mime_type", "image/png"), ""
-            last_error = f"{model}: no image returned"
+                    if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                        return base64.b64decode(block["data"]), block.get("mime_type") or block.get("mimeType") or "image/png", ""
+            last_error = f"Gemini image key {key_index}: successful request but no image block was returned."
         except Exception as exc:
-            last_error = f"{model}: {clean_error(exc)}"
+            last_error = f"Gemini image key {key_index}: {clean_error(exc)}"
+    if "401" in last_error or "ACCESS_TOKEN_TYPE_UNSUPPORTED" in last_error or "UNAUTHENTICATED" in last_error:
+        return None, None, (
+            "Gemini image authentication was rejected. Check both Gemini API keys in Streamlit Secrets; "
+            "this is not an image-prompt failure. " + last_error
+        )
     return None, None, last_error or "No image was returned by Gemini."
 
 
@@ -1258,45 +1342,47 @@ def acestep_key():
 
 
 def _acestep_audio_bytes_from_response(body):
-    """Extract ACE-Step cloud audio from an OpenAI-compatible response."""
-    choices = body.get("choices") or []
-    message = choices[0].get("message", {}) if choices else {}
-    audio_items = message.get("audio") or body.get("audio") or []
-    if isinstance(audio_items, dict):
-        audio_items = [audio_items]
+    """Extract ACE-Step inline audio from current completion-mode responses."""
+    found = []
 
-    for item in audio_items:
-        if not isinstance(item, dict):
-            continue
-        candidates = [
-            item.get("audio_url", {}).get("url") if isinstance(item.get("audio_url"), dict) else None,
-            item.get("url"),
-            item.get("data"),
-        ]
-        for value in candidates:
-            if not value:
-                continue
-            if isinstance(value, str) and value.startswith("data:"):
-                try:
-                    encoded = value.split(",", 1)[1]
-                    return base64.b64decode(encoded), "audio/wav", "wav"
-                except Exception:
-                    continue
-            if isinstance(value, str):
-                try:
-                    return base64.b64decode(value), "audio/wav", "wav"
-                except Exception:
-                    continue
+    def inspect(obj):
+        if isinstance(obj, dict):
+            # Standard completion response: audio_url.url = data:audio/mpeg;base64,...
+            au = obj.get("audio_url")
+            if isinstance(au, dict) and au.get("url"):
+                found.append(au.get("url"))
+            if isinstance(obj.get("url"), str) and (obj["url"].startswith("data:audio/") or "," in obj["url"]):
+                found.append(obj["url"])
+            if isinstance(obj.get("data"), str):
+                val = obj["data"]
+                if val.startswith("data:audio/") or (len(val) > 1000 and re.fullmatch(r"[A-Za-z0-9+/=\\s]+", val)):
+                    found.append(val)
+            for value in obj.values():
+                inspect(value)
+        elif isinstance(obj, list):
+            for value in obj:
+                inspect(value)
 
-    # Some compatible responses expose base64 directly in message.audio.data.
-    raw_audio = message.get("audio")
-    if isinstance(raw_audio, str):
+    inspect(body)
+    for value in found:
         try:
-            return base64.b64decode(raw_audio), "audio/wav", "wav"
+            if value.startswith("data:"):
+                header, encoded = value.split(",", 1)
+                raw = base64.b64decode(encoded)
+                if raw:
+                    if "mpeg" in header or "mp3" in header:
+                        return raw, "audio/mpeg", "mp3"
+                    if "wav" in header:
+                        return raw, "audio/wav", "wav"
+                    return raw, header.split(";", 1)[0], "audio"
+            else:
+                raw = base64.b64decode(value)
+                if raw:
+                    return raw, "audio/mpeg", "mp3"
         except Exception:
-            pass
+            continue
 
-    detail = message.get("content") or body.get("error") or body.get("message") or body
+    detail = body.get("error") or body.get("message") or body.get("choices") or body
     if isinstance(detail, (dict, list)):
         detail = json.dumps(detail, ensure_ascii=False)[:2500]
     raise RuntimeError(f"ACE-Step returned no usable audio: {detail}")
@@ -1542,56 +1628,62 @@ def generate_song_track(duration_sec: int, style: str, lyrics: str, vocal_type: 
 
 
 def _extract_gemini_music_audio(body):
-    """Extract Lyria audio + lyrics from the Gemini Interactions REST response."""
-    audio_b64 = None
-    audio_mime = "audio/mpeg"
+    """Extract Lyria audio robustly from convenience or interleaved response blocks."""
+    audio_candidates = []
     text_parts = []
 
-    # Current Interactions responses expose generated content inside steps.
-    for step in body.get("steps", []) or []:
-        if not isinstance(step, dict) or step.get("type") != "model_output":
-            continue
-        for block in step.get("content", []) or []:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type")
-            if btype == "audio" and block.get("data"):
-                audio_b64 = block.get("data")
-                audio_mime = block.get("mime_type") or block.get("mimeType") or "audio/mpeg"
-            elif btype in ("text", "output_text"):
-                value = block.get("text") or block.get("data") or ""
-                if value:
-                    text_parts.append(str(value))
+    def walk(obj):
+        if isinstance(obj, dict):
+            typ = str(obj.get("type", "")).lower()
+            if typ == "audio" and obj.get("data"):
+                audio_candidates.append((obj.get("data"), obj.get("mime_type") or obj.get("mimeType") or "audio/mpeg"))
+            if typ in ("text", "output_text"):
+                val = obj.get("text") or obj.get("data")
+                if val:
+                    text_parts.append(str(val))
+            for key in ("steps", "content", "output", "model_output"):
+                if key in obj:
+                    walk(obj[key])
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
 
-    # Convenience properties documented by Google.
+    # Prefer documented convenience property, then scan the complete response.
     output_audio = body.get("output_audio") or body.get("outputAudio")
-    if not audio_b64 and isinstance(output_audio, dict):
-        audio_b64 = output_audio.get("data")
-        audio_mime = output_audio.get("mime_type") or output_audio.get("mimeType") or audio_mime
+    if isinstance(output_audio, dict) and output_audio.get("data"):
+        audio_candidates.append((output_audio.get("data"), output_audio.get("mime_type") or output_audio.get("mimeType") or "audio/mpeg"))
     output_text = body.get("output_text") or body.get("outputText")
-    if output_text and not text_parts:
+    if output_text:
         text_parts.append(str(output_text))
+    walk(body)
 
-    if not audio_b64:
+    # Deduplicate identical audio blocks while preserving order.
+    seen = set()
+    unique = []
+    for item in audio_candidates:
+        key = item[0]
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(item)
+    if not unique:
         return None, None, "Gemini Lyria returned no audio data."
+
+    # If multiple audio blocks are returned, the last block is the documented convenience output.
+    audio_b64, audio_mime = unique[-1]
     try:
         raw = base64.b64decode(audio_b64)
     except Exception as exc:
         return None, None, f"Could not decode Gemini music audio: {clean_error(exc)}"
     if not raw:
         return None, None, "Gemini Lyria returned empty audio data."
-
     mime = str(audio_mime or "audio/mpeg").lower()
     if "wav" in mime:
-        ext = "wav"
-        mime = "audio/wav"
+        ext, mime = "wav", "audio/wav"
     elif "ogg" in mime:
-        ext = "ogg"
-        mime = "audio/ogg"
+        ext, mime = "ogg", "audio/ogg"
     else:
-        ext = "mp3"
-        mime = "audio/mpeg"
-    return raw, (mime, ext), "\n\n".join(text_parts).strip()
+        ext, mime = "mp3", "audio/mpeg"
+    return raw, (mime, ext), "\n\n".join(dict.fromkeys(text_parts)).strip()
 
 
 def generate_song_with_gemini_lyria(duration_sec: int, style: str, lyrics: str, vocal_type: str):
@@ -1630,6 +1722,7 @@ User lyrics or song topic:
             payload = {
                 "model": model,
                 "input": prompt,
+                "response_format": {"type": "audio"},
             }
             response = requests.post(
                 url,
@@ -1915,17 +2008,54 @@ def page_music():
             st.markdown("---")
 
 
-def page_admin_music():
-    st.markdown('<div class="hero"><h1>🔐 Admin Music Library Manager</h1><p>Upload and manage track files in the local music directory.</p></div>', unsafe_allow_html=True)
-    uploaded_files = st.file_uploader("Upload Audio Files (.mp3, .wav, .m4a, .ogg)", type=["mp3", "wav", "m4a", "ogg"], accept_multiple_files=True, key="admin_music_uploader")
+def admin_password():
+    return (
+        safe_secret("ADMIN_PASSWORD")
+        or safe_secret("ADMIN_MUSIC_PASSWORD")
+        or safe_secret("MUSIC_ADMIN_PASSWORD")
+        or safe_secret("NAVA_BHARAT_ADMIN_PASSWORD")
+    )
 
+
+def require_admin_music_access():
+    """Require an explicit password from Streamlit Secrets before exposing library controls."""
+    configured = admin_password()
+    if not configured:
+        st.error("Admin Music Library is locked because no admin password secret is configured.")
+        st.caption("Add ADMIN_PASSWORD to Streamlit Secrets, then reload the app.")
+        return False
+    if st.session_state.get("admin_music_authenticated"):
+        c1, c2 = st.columns([5, 1])
+        with c2:
+            if st.button("Logout", key="admin_music_logout"):
+                st.session_state["admin_music_authenticated"] = False
+                st.rerun()
+        return True
+
+    st.warning("🔐 Admin authentication required. The music library is not public.")
+    password = st.text_input("Admin Password", type="password", key="admin_music_password_input")
+    if st.button("🔓 Login", key="admin_music_login"):
+        if password and hmac.compare_digest(password, configured):
+            st.session_state["admin_music_authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect admin password.")
+    return False
+
+
+def page_admin_music():
+    st.markdown('<div class="hero"><h1>🔐 Admin Music Library Manager</h1><p>Private administrator area for uploading and deleting library tracks.</p></div>', unsafe_allow_html=True)
+    if not require_admin_music_access():
+        return
+    uploaded_files = st.file_uploader("Upload Audio Files (.mp3, .wav, .m4a, .ogg)", type=["mp3", "wav", "m4a", "ogg"], accept_multiple_files=True, key="admin_music_uploader")
     if st.button("💾 Save to Library", key="save_music_btn"):
         if not uploaded_files:
             st.warning("Please select files to upload.")
         else:
             count = 0
             for uf in uploaded_files:
-                dest = MUSIC_DIR / uf.name
+                safe_name = Path(uf.name).name
+                dest = MUSIC_DIR / safe_name
                 dest.write_bytes(uf.getvalue())
                 count += 1
             st.success(f"Saved {count} track(s) to music library.")
@@ -1941,7 +2071,7 @@ def page_admin_music():
             with c1: st.write(f"📄 {f.name}")
             with c2:
                 if st.button("🗑️ Delete", key=f"del_{f.name}"):
-                    f.unlink()
+                    f.unlink(missing_ok=True)
                     st.rerun()
 
 
