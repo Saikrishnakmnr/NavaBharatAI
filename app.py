@@ -484,13 +484,28 @@ html, body, [class*="css"] {
     font-weight: 900 !important;
 }
 
-.home-card-1 { background: linear-gradient(135deg,rgba(239,246,255,.98),rgba(219,234,254,.94),rgba(224,231,255,.92)) !important; }
-.home-card-2 { background: linear-gradient(135deg,rgba(250,245,255,.98),rgba(243,232,255,.94),rgba(252,231,243,.92)) !important; }
-.home-card-3 { background: linear-gradient(135deg,rgba(236,253,245,.98),rgba(209,250,229,.94),rgba(207,250,254,.92)) !important; }
-.home-card-4 { background: linear-gradient(135deg,rgba(255,247,237,.98),rgba(254,215,170,.90),rgba(254,240,138,.84)) !important; }
-.home-card-5 { background: linear-gradient(135deg,rgba(239,246,255,.98),rgba(224,242,254,.94),rgba(233,213,255,.92)) !important; }
-.home-card-6 { background: linear-gradient(135deg,rgba(253,242,248,.98),rgba(252,231,243,.94),rgba(244,114,182,.12)) !important; }
-.home-card-7 { background: linear-gradient(135deg,rgba(15,23,42,.98),rgba(88,28,135,.94),rgba(15,23,42,.92)) !important; }
+.home-card-1 { background: linear-gradient(135deg,#fff7ed 0%,#fde68a 38%,#fca5a5 72%,#f0abfc 100%) !important; border-color:rgba(249,115,22,.35) !important; }
+.home-card-2 { background: linear-gradient(135deg,#eff6ff 0%,#bfdbfe 35%,#a5b4fc 68%,#e9d5ff 100%) !important; border-color:rgba(99,102,241,.35) !important; }
+.home-card-3 { background: linear-gradient(135deg,#ecfdf5 0%,#86efac 34%,#67e8f9 68%,#a7f3d0 100%) !important; border-color:rgba(16,185,129,.35) !important; }
+.home-card-4 { background: linear-gradient(135deg,#fdf2f8 0%,#f9a8d4 34%,#c4b5fd 68%,#93c5fd 100%) !important; border-color:rgba(219,39,119,.35) !important; }
+.home-card-5 { background: linear-gradient(135deg,#fefce8 0%,#fde047 32%,#fb7185 65%,#c084fc 100%) !important; border-color:rgba(234,179,8,.38) !important; }
+.home-card-6 { background: linear-gradient(135deg,#ecfeff 0%,#67e8f9 35%,#60a5fa 65%,#818cf8 100%) !important; border-color:rgba(6,182,212,.35) !important; }
+.home-card-7 { background: linear-gradient(135deg,#fff1f2 0%,#fda4af 28%,#d8b4fe 58%,#67e8f9 100%) !important; border-color:rgba(236,72,153,.38) !important; }
+
+.home-card-1, .home-card-2, .home-card-3, .home-card-4, .home-card-5, .home-card-6, .home-card-7 {
+    position:relative; overflow:hidden;
+    box-shadow:0 12px 34px rgba(71,85,105,.14), inset 0 1px 0 rgba(255,255,255,.72) !important;
+}
+.home-card-1::after, .home-card-2::after, .home-card-3::after, .home-card-4::after, .home-card-5::after, .home-card-6::after, .home-card-7::after {
+    content:""; position:absolute; width:180px; height:180px; right:-75px; top:-90px;
+    background:rgba(255,255,255,.34); border-radius:50%; filter:blur(4px); pointer-events:none;
+}
+.home-card-1 h3, .home-card-2 h3, .home-card-3 h3, .home-card-4 h3, .home-card-5 h3, .home-card-6 h3, .home-card-7 h3 {
+    color:#111827 !important; text-shadow:0 1px 0 rgba(255,255,255,.8);
+}
+.home-card-1 p, .home-card-2 p, .home-card-3 p, .home-card-4 p, .home-card-5 p, .home-card-6 p, .home-card-7 p {
+    color:#1f2937 !important; font-weight:600 !important; text-shadow:0 1px 0 rgba(255,255,255,.55);
+}
 
 .home-card-1, .home-card-2, .home-card-3, .home-card-4, .home-card-5, .home-card-6, .home-card-7 {
     transition: transform .20s ease, box-shadow .20s ease, border-color .20s ease;
@@ -1263,14 +1278,13 @@ def generate_gemini_image(prompt: str, image_bytes=None, mime_type: str = "image
                     last_error = f"Gemini image key {key_index}: uploaded image could not be read: {clean_error(exc)}"
                     continue
 
+            # Keep the config compatible with the installed google-genai SDK.
+            # Some SDK releases reject the newer response_format field at validation
+            # time even though the Gemini image model itself supports it. The model
+            # defaults to an appropriate image size/aspect ratio, so requesting only
+            # IMAGE avoids that client-side validation failure.
             config = types.GenerateContentConfig(
                 response_modalities=["IMAGE"],
-                response_format={
-                    "image": {
-                        "aspect_ratio": aspect_ratio,
-                        "image_size": image_size,
-                    }
-                },
             )
 
             response = client.models.generate_content(
