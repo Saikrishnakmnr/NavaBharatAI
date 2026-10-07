@@ -1,0 +1,44 @@
+project_id = "YOUR_PROJECT_REF"
+
+[functions.admin-list]
+verify_jwt = false
+
+[functions.generate-media]
+verify_jwt = false
+
+[functions.admin-delete-ringtone]
+verify_jwt = false
+
+[functions.create-download]
+verify_jwt = false
+
+[functions.preview-ringtone]
+verify_jwt = false
+
+[functions.order-status]
+verify_jwt = false
+
+[functions.cleanup]
+verify_jwt = false
+
+[functions.verify-payment]
+verify_jwt = false
+
+[functions.refresh-catalog]
+verify_jwt = false
+
+[functions.create-payment]
+verify_jwt = false
+
+[functions.ai-text]
+verify_jwt = false
+
+[functions.admin-upload]
+verify_jwt = false
+
+[functions.admin-delete-music]
+verify_jwt = false
+
+
+[functions.live-rss]
+verify_jwt = false
