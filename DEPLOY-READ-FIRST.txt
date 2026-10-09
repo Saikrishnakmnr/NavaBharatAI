@@ -1,0 +1,7 @@
+NavaBharat AI — SOURCE-BASED TEXT/NEWS PATCH (candidate)
+BASE: NavaBharatAI-main (6).zip
+REPLACE ON GITHUB ROOT: app.js, styles.css ONLY.
+SUPABASE: No deployment, SQL, secrets or bucket changes.
+CHANGES: Rich formatted AI outputs; larger lyrics editors; live-rss first for jobs; no synthetic "live" news fallback; search links even when AI fails.
+NOT FIXED: Gemini HTTP 401 API_KEY_SERVICE_BLOCKED. This error requires separately verified API access and deployment. These frontend changes CANNOT resolve it. Live RSS depends on current deployed function and upstream feed availability.
+NOT TESTED: Full mobile browser, live Supabase requests, payments. Back up working files before any deployment. Preserve music, ringtone, video, admin and payment backends.
