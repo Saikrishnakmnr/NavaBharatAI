@@ -1,0 +1,37 @@
+SOURCE: NavaBharatAI-main (5).zip.
+
+This is a LIMITED SAFE FOUNDATION patch, NOT the complete ad marketplace or Gemini/AI repair.
+
+MONETAG DIAGNOSIS
+- The original index.html ALREADY embeds https://3nbf4.com/act/files/tag.min.js?z=11941649. Do not paste it again.
+- Your attached sw (5).js belongs to Monetag zone 11941649 and imports 3nbf4.com service-worker.min.js.
+- Your existing GitHub root /sw.js is the NavaBharat PWA service worker. DO NOT replace it blindly with sw (5).js: the PWA might stop functioning.
+- First use Monetag's code insertion verification method and inspect the actual published PAGE SOURCE, not only local GitHub files. If Monetag explicitly requires a root file, request/confirm the EXACT expected URL and filename from Monetag support before merging service-worker code.
+- Confirm domain exactly navabharatai.racharlgpt.in in Monetag and that the verification script is present in the public live <head>. Domain propagation/CDN cache can delay validation.
+- Live site could not be fetched from the current environment. Verification has NOT been proven.
+
+AFFILIATE LINKS
+- Sign up to legitimate partner programs yourself; obtain your unique approved links.
+- Disclose affiliate links near recommendations. Use rel="sponsored nofollow noopener" for sponsored affiliate external links.
+- This package adds an honest Resources/Disclosure page with NO placeholder commercial links. Add real approved URLs ONLY once available.
+
+SEO
+- A sitemap and robots file are included. Sitemap only lists the home page and standalone resources page; do not promise every JS ?page= route is independently indexed.
+- Your app's deep ?page= routes share the same HTML title/canonical; genuine route-specific SEO requires distinct crawlable page HTML or a rendering approach.
+- After deployment submit /sitemap.xml in Google Search Console and inspect indexed URLs. Indexing is up to search engines.
+
+PWA
+- Keeps original sw.js unchanged. Adds raster PWA icons for stronger cross-device compatibility and updates manifest.
+- Offline and installability have NOT been verified in a live browser.
+
+DEPLOY
+1. BACK UP the live repository.
+2. Replace root index.html, styles.css, manifest.webmanifest; ADD assets/racharlgpt-icon-192.png, assets/racharlgpt-icon-512.png, assets/racharlgpt-original-logo.jpg, robots.txt, sitemap.xml, resources.html.
+3. Do not replace app.js, sw.js, config.js, any Supabase functions, storage, schema, or payment files.
+4. Confirm https://navabharatai.racharlgpt.in/robots.txt and /sitemap.xml and /resources.html are accessible.
+5. Validate GA4, Monetag verification manually. This does not promise Monetag approval.
+
+NOT INCLUDED / STILL PENDING
+- Monetag root service worker integration pending exact verification requirements.
+- Live GA4 dashboard; paid ad marketplace and Razorpay ad orders; ad approval, scheduled storage cleanup; AI fallback and 401; universal SEO indexing. These require separately reviewed current Supabase schema, buckets, deployed functions and tests.
+- No user-facing AI/music/video/admin logic touched.
