@@ -1,0 +1,5 @@
+{
+  "version": "16.1.0",
+  "released": "2026-10-09",
+  "message": "Targeted Gemini auth fallback, image endpoint and admin DOM guard"
+}

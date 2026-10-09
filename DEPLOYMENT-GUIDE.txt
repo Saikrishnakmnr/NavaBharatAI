@@ -1,0 +1,52 @@
+NavaBharat AI — targeted replacement patch (16.1.0)
+
+BASELINE
+This patch is built against NavaBharatAI-main (3)(1).zip. It is NOT a full project.
+
+FILES IN THIS ZIP
+app.js                                      frontend; guarded admin polling DOM access
+config.js, sw.js, version.json              cache/version bump so browsers fetch the patch
+supabase/functions/ai-text/index.ts         Gemini text/grounded-search auth fallback
+supabase/functions/live-rss/index.ts       RSS -> GDELT -> Gemini fallback with bounded timeouts
+supabase/functions/generate-media/index.ts AI image request corrected; music provider functions restored exactly from V16
+
+IMPORTANT PRESERVATIONS
+- ACE-Step is the primary music provider.
+- Lyria 3.5 and APIFrame remain fallback providers. The ACE/Lyria/APIFrame function block is copied from V16.
+- Razorpay/create-payment/verify-payment/create-download/admin-list are NOT replaced.
+- No database schema or SQL change is required for this patch. Do not run V16_REPAIR.sql or PERMISSION_REPAIR.sql again just for this patch.
+- No new secrets are required.
+
+DEPLOY FRONTEND
+1. Download and extract this ZIP locally.
+2. Copy app.js, config.js, sw.js and version.json into the repository root, replacing those four files only.
+3. Commit and push to the existing GitHub Pages branch/repository. Keep index.html, styles.css, CNAME, and every other file unchanged.
+4. Wait for GitHub Pages deployment to complete. Open the site and do a hard refresh (Ctrl+Shift+R); on mobile, close/reopen the tab if it retains the old service worker.
+
+DEPLOY SUPABASE EDGE FUNCTIONS (Dashboard / Editor)
+Deploy ONLY these three function source files, one function at a time, into the existing functions with the same names:
+- supabase/functions/ai-text/index.ts       -> function ai-text
+- supabase/functions/live-rss/index.ts      -> function live-rss
+- supabase/functions/generate-media/index.ts -> function generate-media
+Paste each index.ts as the complete source for that function and deploy/save. Do not create a shared _shared.ts function/file; these are self-contained.
+Do NOT redeploy or replace create-payment, verify-payment, create-download, admin-list, admin-upload, order-status, or other functions.
+
+SUPABASE SECRETS
+Keep existing secrets unchanged. The functions read the existing GEMINI_API_KEY and GEMINI_API_KEY_2 (plus existing aliases if configured), ACESTEP_API_KEY, APIFRAME_API_KEY, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, ADMIN_API_TOKEN, SUPABASE_SERVICE_ROLE_KEY and SITE_URL. Do not add ACESTEP_BASE_URL, ACESTEP_MODEL or APIFRAME_BASE_URL.
+If the existing GEMINI_MODEL secret is set, this patch respects it; otherwise text/grounded calls use gemini-3.8-flash. Image generation tries gemini-nano-banana-2.1 first, then the existing image fallbacks.
+
+SQL
+No SQL query is required for these code-only changes. Because the current Admin and Razorpay flows are working, do not rerun schema or permission SQL without a separate, verified database error.
+
+POST-DEPLOY CHECKS
+1. AI Solve: simple prompt, e.g. "Explain photosynthesis in 3 points".
+2. Science: "Why is the sky blue?".
+3. Lyrics: enter an idea and generate lyrics.
+4. Poster Design: create a simple test poster.
+5. Live News: fetch English RSS; RSS/GDELT should be tried before Gemini.
+6. Song generation: verify ACE-Step first; fallback order remains ACE-Step -> Lyria -> APIFrame as configured.
+7. Razorpay/Admin: these files were not changed; check they still behave as before.
+8. Video Extractor/Reel Maker: app.js syntax is checked and their functions were not changed in this patch.
+
+LIMITATIONS
+Static syntax checks passed for app.js. This environment cannot access your live Supabase project or make real paid provider calls, so live API/payment success cannot be certified here. If Gemini still returns 401, check the Supabase Edge Function log response after this patch; do not replace the project or change other providers.
