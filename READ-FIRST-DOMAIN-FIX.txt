@@ -1,0 +1,20 @@
+NavaBharat AI — domain and sidebar correction
+
+CONFIRMED ROOT CAUSE:
+The current GitHub source CNAME uses navabharatai.racharlagpt.in (with racharla).
+The previous SEO ZIP mistakenly used navabharatai.racharlgpt.in (missing the a) in its canonical links, navigation and sitemap.
+The correct site is https://navabharatai.racharlagpt.in/
+
+UPLOAD TO THE SAME GITHUB ROOT AS index.html:
+The files in this ZIP; replace matches, add missing files.
+KEEP THE EXISTING CNAME UNCHANGED: navabharatai.racharlagpt.in
+DO NOT upload this ZIP as a nested folder.
+NO SUPABASE FUNCTION / DATABASE CHANGES.
+NO changes to app.js, sw.js, config.js, music, video, Razorpay or admin logic.
+
+CHANGES:
+- Correct domain URLs in foundation pages, robots.txt and sitemap.xml.
+- Restore visible NavaBharat AI title beside RacharlaGPT logo in sidebar.
+- Preserve existing analytics, Monetag reference, favicon, PWA manifest and assets.
+
+NOT FIXED: Gemini errors, monetag verification, jobs/news or new ad marketplace.
