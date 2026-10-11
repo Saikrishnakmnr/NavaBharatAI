@@ -1,0 +1,21 @@
+NavaBharat AI — minimal public-page discoverability patch (2026-10-11)
+
+Issue: index.html had an empty <div id="app"></div>. The actual home page is populated by JavaScript, so crawlers that do not render JavaScript can see the title and shell but not the features. This does not mean human visitors cannot see the page.
+
+Changes:
+- index.html: meaningful readable HTML inside #app, with links to core tools. Existing JavaScript render() replaces this fallback on startup. No business logic changed.
+- config.js: corrected SITE_URL domain typo (racharlgpt -> racharlagpt).
+- sw.js: changed cache namespace so previously installed service workers refresh static files.
+
+Deploy ONLY these three files to the EXISTING website/repository root, preserving paths and name. Other files are unchanged. Do NOT edit CNAME, DNS, Supabase secrets, SQL, or payment function deployments for this patch. Take a backup or commit before changing anything.
+
+Your existing directory listings, Search Console property and backlinks use the same public URL, so a content-only update normally requires no new registration. You can request a new crawl in Search Console after deployment. The existing public URL must remain https://navabharatai.racharlagpt.in/ .
+
+Caveats: Google can render JavaScript; the empty initial markup is a discoverability limitation, not proof that Google never indexed the app. This patch does not establish that AI integrations or payment flows work. Existing meta google-site-verification value is preserved; verify its validity in Search Console rather than changing it blindly. An HTML fallback improves access for basic crawlers but does not guarantee ranking or traffic.
+
+Check after upload:
+1. Visit the homepage in a fresh/private browser window, test menu and AI Solve link.
+2. View page SOURCE (not Inspect Element), confirm 'Explore NavaBharat AI tools' is in #app.
+3. Test payment and AI workflows separately; this patch did not change them.
+4. Google Search Console: URL Inspection -> Test live URL -> Request indexing if appropriate.
+5. If the old page persists, reload the browser and clear its site cache.
