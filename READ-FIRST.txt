@@ -1,0 +1,36 @@
+NavaBharat AI — visible receipts and guest-download access
+Source: user's uploaded NavaBharatAI-main (8).zip.
+SCOPE: app.js only. DO NOT redeploy the Supabase functions, schema, Razorpay or other files with this ZIP.
+
+AUDIT FINDINGS
+1) Guest receipt code was already issued by the ZIP's create-payment function and stored in browser localStorage. But the receipt itself was never displayed before Razorpay checkout, and the UI link was buried in Premium & Support.
+2) After successful payment, the download URL button was inserted into the currently rendered song/ringtone page only. Navigation erased that button.
+3) The ZIP contains order-status and create-download requiring a matching private recovery code. They cannot safely recover legacy orders that have no recovery_hash.
+4) Backend download entitlement lasts 30 days in verify-payment/order-status, and create-download checks expiry.
+5) Live Supabase deployment/version, database migrations, and actual Razorpay payment have NOT been verified by this offline review.
+
+WHAT THIS PATCH CHANGES
+- Adds My Purchases as a visible sidebar page and a home card.
+- Adds Recover buttons on music, ringtone generator and ringtone catalog pages.
+- AFTER order creation but BEFORE opening Razorpay: displays order ID and private code and offers downloadable TXT receipt. User must acknowledge this before continuing to payment.
+- Keeps browser-local receipt record and displays receipt download and re-download buttons in My Purchases.
+- Provides manual entry for an existing order ID AND private recovery code on any browser.
+- On payment return, opens My Purchases instead of navigating straight to an expiring signed URL.
+- Does NOT change pricing, checkout verification, file storage, entitlement duration or Admin.
+
+INSTALL (AFTER BACKUP)
+1. Back up current GitHub app.js (keep a separate local copy).
+2. Replace ONLY root app.js on GitHub from this folder. Do not upload the zip as a whole.
+3. Wait for GitHub Pages update, press Ctrl+Shift+R, and check the sidebar shows My Purchases.
+4. BEFORE ANY PAYMENT: Open My Purchases. If your recent order appears, click Check & re-download. You should not need to pay again.
+5. If your order does not appear, search your browser for an old saved private receipt. Without it, the backend cannot safely recover an old paid purchase automatically.
+6. Test the new receipt display and TXT download using a CANCELED/UNPAID checkout. The order will be created but DO NOT complete payment. This tests the before-checkout UI safely.
+7. A complete paid re-download test still requires checking deployed Supabase functions against this source and an authorized real/test payment; do not invite public paying customers before that succeeds.
+
+IMPORTANT ON EXISTING PAID ORDERS
+- DO NOT buy the song again just to try this fix.
+- If a purchase was made in this same browser after receipt storage code was deployed, it may already be in My Purchases; check first.
+- If the receipt is absent or the order predates private codes, contact app support with public order ID and Razorpay payment ID only (not card numbers/UPI PIN). Admin must verify payment and asset ownership and provide a controlled remedy. This ZIP DOES NOT add a verified legacy recovery workflow.
+- Browser localStorage can be lost on clearing site data, using Incognito, or switching browsers/devices. Save private receipt TXT securely.
+
+ROLLBACK: Restore only the original app.js from your GitHub backup.

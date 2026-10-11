@@ -1,0 +1,22 @@
+SOURCE VERIFICATION: NavaBharatAI-main (8).zip
+
+Present in ZIP:
+- app.js: startRazorpayPayment -> create-payment -> saveGuestPurchase -> Razorpay handler -> verify-payment -> onPaid -> create-download
+- app.js: guestPurchases, purchaseToken, purchaseRows, guestDownload, recoverGuestManual
+- app.js: Premium page contains a buried My Purchases card
+- create-payment/index.ts: creates randomized recovery code and stores SHA-256 hash in orders.recovery_hash
+- RUN-ONCE.sql: ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS recovery_hash text
+- verify-payment/index.ts: verifies Razorpay order remotely; when paid, marks order and creates entitlement for song/ringtone/design with 30-day expiry
+- order-status/index.ts: demands private code and can reconcile a paid Razorpay order
+- create-download/index.ts: demands verified paid order, private code, unexpired entitlement and existing storage asset; issues temporary signed download URL
+- admin-list/index.ts: selects orders created_at, paid_at, razorpay_payment_id, downloaded_at
+
+FAILED USER EXPERIENCE IN SOURCE:
+- Receipt issuance was never shown to users explicitly before checkout: saving in localStorage was invisible.
+- Paid-media download button existed only in current DOM, not on a persistent customer page.
+- No obvious My Purchases navigation entry.
+- Old paid orders without recovery_hash get explicit rejection in order-status and create-download.
+- No automatic email/SMS receipt, since customer email/phone are not mandatory for song and ringtone.
+- No account-based recovery by design.
+
+NOT VERIFIED: deployment parity, SQL applied, Razorpay live outcomes, Supabase storage permissions, real 30-day postpayment recoverability.
