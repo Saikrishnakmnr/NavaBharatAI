@@ -1,3 +1,9 @@
+# Current update: free chat 16.2
+
+Read **FREE-CHAT-DEPLOYMENT.md** first for this release. General, Student and Astro chat are free; existing paid media is unchanged. Validation status: **FREE-CHAT-VERIFICATION.md**.
+
+---
+
 # NavaBharat AI — RacharlaGPT
 
 Production release 13.0.0: pure HTML/CSS/JavaScript frontend + Supabase Edge Functions. No Streamlit runtime is shipped.

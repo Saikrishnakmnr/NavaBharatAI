@@ -1,0 +1,58 @@
+[
+  {
+    "file": "DEPLOY-READ-FIRST.txt",
+    "change": "modified"
+  },
+  {
+    "file": "FREE-CHAT-DEPLOYMENT.md",
+    "change": "added"
+  },
+  {
+    "file": "FREE-CHAT-VERIFICATION.md",
+    "change": "added"
+  },
+  {
+    "file": "README.md",
+    "change": "modified"
+  },
+  {
+    "file": "app.js",
+    "change": "modified"
+  },
+  {
+    "file": "chat.css",
+    "change": "added"
+  },
+  {
+    "file": "chat.js",
+    "change": "added"
+  },
+  {
+    "file": "config.js",
+    "change": "modified"
+  },
+  {
+    "file": "index.html",
+    "change": "modified"
+  },
+  {
+    "file": "supabase/FREE_CHAT_SETUP.sql",
+    "change": "added"
+  },
+  {
+    "file": "supabase/functions/ai-text/index.ts",
+    "change": "modified"
+  },
+  {
+    "file": "sw.js",
+    "change": "modified"
+  },
+  {
+    "file": "tests/free-chat.test.mjs",
+    "change": "added"
+  },
+  {
+    "file": "version.json",
+    "change": "modified"
+  }
+]
