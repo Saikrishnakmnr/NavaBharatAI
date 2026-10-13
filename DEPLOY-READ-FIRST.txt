@@ -1,3 +1,8 @@
+CURRENT RELEASE 16.2: Read FREE-CHAT-DEPLOYMENT.md before uploading.
+Run only the new FREE_CHAT_SETUP.sql and deploy updated ai-text, then frontend. Do not rerun historical SQL or redeploy every older function.
+
+Historical note follows:
+
 NavaBharat AI — SOURCE-BASED TEXT/NEWS PATCH (candidate)
 BASE: NavaBharatAI-main (6).zip
 REPLACE ON GITHUB ROOT: app.js, styles.css ONLY.
