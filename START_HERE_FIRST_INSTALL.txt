@@ -1,0 +1,14 @@
+NavaBharatAI eBook Store V2 - FIRST INSTALL
+
+This ZIP combines the original full eBook store package and the newer Admin V2 replacements. No earlier eBook ZIP is required.
+
+1. Back up your current GitHub website and Supabase database.
+2. Read EBOOK_DEPLOYMENT_GUIDE.md and EBOOK_ADMIN_V2_READ_FIRST.md.
+3. Run EBOOK_STORE_SETUP.sql in your Supabase SQL Editor (once).
+4. Confirm storage buckets and security policies.
+5. Deploy supabase/functions/ebook-store/index.ts and supabase/functions/ebook-admin/index.ts to Supabase.
+6. Upload new ebook files at the repository root and replace index.html ONLY if reviewed against your current deployed index.html.
+7. Test admin uploads, prices, purchases, verification, downloads, recovery, and refunds in test mode.
+
+Existing app.js and existing payment/recovery Edge Functions are NOT in this ZIP.
+Do not overwrite them. This package has not been live-tested.
