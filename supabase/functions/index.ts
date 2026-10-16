@@ -1,0 +1,59 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+export const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type, x-admin-token'};
+export const json=(x:any,status=200)=>new Response(JSON.stringify(x),{status,headers:{...cors,'Content-Type':'application/json'}});
+export const db=()=>createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+export const secret=(n:string)=>Deno.env.get(n)||'';
+
+Deno.serve(async req=>{
+ if(req.method==='OPTIONS')return new Response('ok',{headers:cors});
+ try{
+  const gateClient=db();
+  const {data:gate,error:gateError}=await gateClient.from('nava_site_settings').select('maintenance_enabled').eq('id',1).single();
+  if(gateError)throw Error('Service temporarily unavailable. Please try again shortly.');
+  if(gate?.maintenance_enabled)return json({error:'NavaBharat AI is under maintenance. New orders and generation are paused.'},503);
+  const {kind,item_id,asset_id,amount,customer}=await req.json();
+  const d=db(); let amt=Number(amount);
+  async function configured(k:string,fallback:number){const {data,error}=await d.from('nava_prices').select('regular_price,offer_price,offer_enabled').eq('key',k).maybeSingle();if(error)throw error;return data?(data.offer_enabled?data.offer_price:data.regular_price):fallback;}
+
+  if(kind==='ringtone'){
+    if(item_id){
+      const {data:r,error}=await d.from('ringtones').select('id,price_inr,active').eq('id',item_id).single();
+      if(error)throw error;if(!r||!r.active)throw Error('Ringtone unavailable');
+      amt=await configured('ringtone_library',Number(r.price_inr||10));
+    }else if(asset_id){
+      const {data:a,error}=await d.from('generated_assets').select('id,kind').eq('id',asset_id).single();
+      if(error)throw error;if(!a||a.kind!=='ringtone')throw Error('Generated ringtone asset not found');
+      amt=await configured('ringtone',10);
+    }else throw Error('Ringtone item is required');
+  }else if(kind==='song'){
+    if(!asset_id)throw Error('Song asset is required');
+    const {data:a,error}=await d.from('generated_assets').select('id,kind').eq('id',asset_id).single();
+    if(error)throw error;if(!a||a.kind!=='song')throw Error('Song asset not found');
+    amt=await configured('song',10);
+  }else if(kind==='design'){
+    if(!asset_id)throw Error('Design asset is required');
+    const {data:a,error}=await d.from('generated_assets').select('id,kind').eq('id',asset_id).single();
+    if(error)throw error;if(!a||!['design','3d-design'].includes(a.kind))throw Error('Design asset not found');
+    amt=await configured('design',9);
+  }else if(kind==='tip'||kind==='gift'){
+    amt=Number(amount);
+  }
+  if(!amt||amt<1||(kind==='ringtone'&&amt<1)||(kind==='song'&&amt<1)||(kind==='design'&&amt<1))throw Error('Invalid payment amount');
+  const key=secret('RAZORPAY_KEY_ID'),sec=secret('RAZORPAY_KEY_SECRET');
+  if(!key||!sec)throw Error('Razorpay keys are not configured in Supabase');
+  const publicId='NAVA-'+crypto.randomUUID().slice(0,8).toUpperCase();
+  const recoveryCode=crypto.randomUUID()+'-'+crypto.randomUUID();
+  const recoveryHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(recoveryCode))),b=>b.toString(16).padStart(2,'0')).join('');
+  const auth=btoa(`${key}:${sec}`);
+  const rr=await fetch('https://api.razorpay.com/v1/orders',{method:'POST',headers:{Authorization:`Basic ${auth}`,'Content-Type':'application/json'},body:JSON.stringify({
+    amount:Math.round(amt*100),currency:'INR',receipt:publicId,notes:{nava_order_id:publicId,kind:String(kind),customer_name:String(customer?.name||'').slice(0,100),whatsapp:String(customer?.whatsapp||'').slice(0,30),message:String(customer?.message||'').slice(0,200)}
+  })});
+  const rj=await rr.json();if(!rr.ok)throw Error(rj.error?.description||rj.error?.code||'Razorpay order creation failed');
+  const {data:o,error}=await d.from('orders').insert({
+    public_order_id:publicId,kind,item_id:item_id||null,asset_id:asset_id||null,amount_inr:amt,
+    razorpay_order_id:rj.id,recovery_hash:recoveryHash,customer_email:customer?.email||null,customer_data:customer||{}
+  }).select().single();
+  if(error)throw error;
+  return json({order_id:publicId,recovery_code:recoveryCode,razorpay_order_id:rj.id,key_id:key,amount:Math.round(amt*100),currency:'INR',description:kind==='gift'?'NavaBharat AI — Personalised Song Gift ₹99':`NavaBharat AI ${kind} — ₹${amt}`});
+ }catch(e){return json({error:String(e.message||e)},500)}
+});
